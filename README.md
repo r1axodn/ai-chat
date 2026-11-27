@@ -131,14 +131,16 @@ https://<주소>/?invite=s1.<tokenId>.<wrapKey>
 
 ## 8. GitHub Pages 배포
 
-이 저장소는 <https://github.com/r1axodn/ai-chat> 이고, 이미 `main` 브랜치로 배포되어 있습니다: <https://r1axodn.github.io/ai-chat/>
+- 사이트: <https://r1axodn.github.io/ai-chat/>
+- 저장소: <https://github.com/r1axodn/ai-chat>
+- 소스: `main` 브랜치 · 배포: `gh-pages` 브랜치 루트 (Pages 가 여기서 빌드합니다)
 
-수정 후에는:
+수정한 뒤 반영:
 
 ```bash
-git add -A && git commit -m "..." && git push
+git add -A && git commit -m "..." && git push origin main
+git push -f origin main:gh-pages   # 정적 배포 브랜치 동기화
 ```
 
-Pages 는 `main` 루트를 바라보고 있어서 푸시하면 1분 안에 반영됩니다.
-
-`config.js` 에 값을 넣지 않았다면 배포 페이지도 데모로 열리고, 방문자가 각자 [방 관리 → 연결]에서 자기 프로젝트를 붙일 수 있습니다.
+푸시 후 1분 안에 Pages 가 다시 빌드됩니다. `config.js` 에 값을 넣지 않았다면 배포 페이지도 데모로 열리고,
+방문자가 각자 [방 관리 → 연결]에서 자기 Supabase 프로젝트를 붙일 수 있습니다.
