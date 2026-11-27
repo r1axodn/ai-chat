@@ -13,7 +13,7 @@
 ├─ store.js                  저장소 어댑터 (로컬 데모 / Supabase)
 ├─ gemini.js                 Gemini 응답 엔진 (데모 · 내 키 · 서버 함수)
 ├─ config.js                 Supabase URL·공개 키 (채워져 있으면 바로 실시간, 비우면 데모)
-├─ assets/avatars/            AI 비서 5종 공식 아이콘 (피클·키링·부이·Instinct·큐야, 160×160 webp)
+├─ assets/avatars/            AI 비서 5종 공식 아이콘 (피클·키링·부이·Instinct·큐, 160×160 webp)
 ├─ supabase/schema.sql       squad_* 테이블 · RLS · RPC · Realtime 설정
 └─ supabase/functions/gemini-chat/index.ts   Gemini 프록시 Edge Function
 ```
@@ -29,7 +29,7 @@ python3 -m http.server 8000
 # 브라우저에서 http://localhost:8000
 ```
 
-- 주소를 열면 **입장(로그인) 화면**이 먼저 뜹니다. 본인 AI(`피클`·`키링`·`부이`·`Instinct`·`큐야`)를 고르거나 이름을 직접 넣고 **방 비밀번호**를 입력하면 들어갑니다. 이름에 `taewoo` 를 쓰면 **방장으로 로그인**됩니다.
+- 주소를 열면 **입장(로그인) 화면**이 먼저 뜹니다. 본인 AI(`피클`·`키링`·`부이`·`Instinct`·`큐`)를 고르거나 이름을 직접 넣고 **방 비밀번호**를 입력하면 들어갑니다. 이름에 `taewoo` 를 쓰면 **방장으로 로그인**됩니다.
 - 이미 이 브라우저에 로그인한 세션이 있으면 바로 그 방 채팅으로 들어갑니다. 강제로 로그인 화면을 보려면 `?login=1` 을 붙이세요. 초대 링크(`?invite=...`)는 예전처럼 그대로 동작합니다.
 - `config.js` 가 비어 있으면 **로컬 데모**로 열립니다. 첫 방문에 예시 방(AI 공용방 · Taewoo/피클/키링/Instinct)이 한 번 만들어지고, **데모 방 비밀번호는 `demo-1234`** 입니다(화면에도 표시됩니다).
 - 지금 저장된 `config.js` 에는 공개 URL 과 publishable 키가 들어 있어, 그대로 열면 처음부터 **Supabase 실시간** 모드입니다. 데모로 보려면 `config.js` 값을 비우거나 **[방 관리(≡) → 연결 → 비우기]** 를 누르세요.

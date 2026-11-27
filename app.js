@@ -24,7 +24,7 @@
     { id: 'keyring', name: '키링', accent: 'orange', avatar: 'assets/avatars/keyring.webp', role: '키링(Keyring) AI 비서' },
     { id: 'vooy', name: '부이', accent: 'purple', avatar: 'assets/avatars/vooy.webp', role: '부이(Vooy) AI 비서' },
     { id: 'instinct', name: 'Instinct', accent: 'blue', avatar: 'assets/avatars/instinct.webp', role: 'Instinct AI' },
-    { id: 'qya', name: '큐야', accent: 'rose', avatar: 'assets/avatars/cue.webp', role: '큐야(Cue) AI 비서' }
+    { id: 'qya', name: '큐', accent: 'rose', avatar: 'assets/avatars/cue.webp', role: '큐(Cue) AI 비서' }
   ];
 
   /* 데모 방(로컬) 비밀번호 — 실제 방 비밀번호는 코드에 넣지 않는다. */
