@@ -12,7 +12,7 @@
 ├─ crypto.js                 Web Crypto: 초대 토큰(AES-GCM), 입장 암호(PBKDF2-SHA256), 메시지 암호화
 ├─ store.js                  저장소 어댑터 (로컬 데모 / Supabase)
 ├─ gemini.js                 Gemini 응답 엔진 (데모 · 내 키 · 서버 함수)
-├─ config.js                 Supabase URL·공개 키 자리 (비워 두면 데모)
+├─ config.js                 Supabase URL·공개 키 (채워져 있으면 바로 실시간, 비우면 데모)
 ├─ supabase/schema.sql       squad_* 테이블 · RLS · RPC · Realtime 설정
 └─ supabase/functions/gemini-chat/index.ts   Gemini 프록시 Edge Function
 ```
@@ -29,6 +29,7 @@ python3 -m http.server 8000
 ```
 
 - `config.js` 가 비어 있으면 **로컬 데모**로 열립니다. 첫 방문에 예시 방(AI 공용방 · Taewoo/Pickle/Instinct/Claude)이 자동으로 만들어집니다.
+- 지금 저장된 `config.js` 에는 공개 URL 과 publishable 키가 들어 있어, 그대로 열면 처음부터 **Supabase 실시간** 모드입니다. 데모로 보려면 `config.js` 값을 비우거나 **[방 관리(≡) → 연결 → 비우기]** 를 누르세요.
 - 대화 · 멤버 · 프로필 사진 · 초대 · 메시지가 전부 `localStorage` 에 남아 **새로고침·브라우저 재시작 후에도 그대로 복원**됩니다.
 - 지우는 방법은 하나뿐입니다: **방 관리(≡) → 방 → 데모 데이터 초기화**. 그 뒤로는 자동 생성되지 않습니다.
 
@@ -47,14 +48,15 @@ python3 -m http.server 8000
 ### 2-2. 앱에 연결
 
 - **방 관리(≡) → 연결** 에 `https://<프로젝트>.supabase.co` 와 **publishable(또는 anon) 키**를 넣고 저장 → 새로고침
-- 또는 `config.js` 의 `supabaseUrl` / `supabaseKey` 를 채워 두면 처음부터 실시간 모드로 열립니다.
+- 주소 끝에 `/` 를 붙여도(`https://<프로젝트>.supabase.co/`) 저장할 때 자동으로 떼어 냅니다.
+- 또는 `config.js` 의 `supabaseUrl` / `supabaseKey` 를 채워 두면 처음부터 실시간 모드로 열립니다. (현재 저장된 값: `friday-hud`·`cubetimer` 와 같은 프로젝트의 공개 URL·publishable 키)
 - **service_role 키는 절대 넣지 마세요.** 브라우저에 노출되는 키입니다(앱이 저장을 거부합니다).
 
 ### 2-3. Gemini 연결 (선택)
 
 | 모드 | 동작 | 키 위치 |
 | --- | --- | --- |
-| **데모** (기본) | API 호출 없이 예시 문장으로 응답 | 없음 |
+| **데모** | API 호출 없이 예시 문장으로 응답 | 없음 |
 | **내 키** | 브라우저 → Google Gemini REST 직접 호출 | 그 탭의 `sessionStorage` 에만 (코드·localStorage·DB 저장 없음) |
 | **서버 함수** | 브라우저 → Supabase Edge Function → Gemini | 함수 환경변수 `GEMINI_API_KEY` 에만 |
 
@@ -120,7 +122,10 @@ https://<주소>/?invite=s1.<tokenId>.<wrapKey>
 - XSS 페이로드(`<img onerror>`)가 글자로만 표시되고 실행되지 않음
 - 초대 폐기 후 링크 차단 / 암호 5회 실패 시 15분 잠금
 - 데스크톱(1280×900) 가운데 프레임
+- [방 관리 → 연결] 주소 끝 `/` 자동 제거 · `config.js` 에 공개 키만 있는지 확인
 - 콘솔 에러 0건
+
+`test/live_tests.py` (로컬 흉내 Supabase 서버): 실시간 모드 입장 · 초대 · 서버 복원 · 암호문 저장 등 24개 확인 통과.
 
 ## 7. 알려진 한계
 
@@ -142,5 +147,4 @@ git add -A && git commit -m "..." && git push origin main
 git push -f origin main:gh-pages   # 정적 배포 브랜치 동기화
 ```
 
-푸시 후 1분 안에 Pages 가 다시 빌드됩니다. `config.js` 에 값을 넣지 않았다면 배포 페이지도 데모로 열리고,
-방문자가 각자 [방 관리 → 연결]에서 자기 Supabase 프로젝트를 붙일 수 있습니다.
+푸시 후 1분 안에 Pages 가 다시 빌드됩니다. `config.js` 에 공개 URL·publishable 키가 들어 있어 배포 페이지도 **처음 방문부터 실시간 모드**로 열립니다.

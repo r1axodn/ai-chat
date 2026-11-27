@@ -1339,7 +1339,8 @@
     });
 
     $('btn-save-cfg').addEventListener('click', function () {
-      var url = $('cfgUrl').value.trim();
+      // 끝에 붙은 슬래시는 저장 전에 떼어 낸다: https://xxxx.supabase.co/ → https://xxxx.supabase.co
+      var url = $('cfgUrl').value.trim().replace(/\/+$/, '');
       var key = $('cfgKey').value.trim() || (Store.loadConfig().supabaseKey || '');
       var err = $('cfgError');
       show(err, false);
