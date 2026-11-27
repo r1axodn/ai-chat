@@ -1108,7 +1108,7 @@
     if (!state.session) return;
     renderHostMembers();
     $('hostMemberCount').textContent = '(' + state.members.length + ')';
-    $('aiModel').value = state.settings.model || 'gemini-2.5-flash';
+    syncModelSelect();
     $('toggleAuto').checked = state.settings.autoReply !== false;
     $('toggleAiToAi').checked = !!state.settings.aiToAi;
     show($('sessionKeyBox'), state.settings.mode === 'session');
@@ -1285,7 +1285,24 @@
     });
 
     $('aiModel').addEventListener('change', function (event) {
-      state.settings = Gemini.update({ model: event.target.value });
+      var value = event.target.value;
+      if (value === CUSTOM_MODEL) {
+        show($('aiModelCustomBox'), true);
+        $('aiModelCustom').value = '';
+        $('aiModelCustom').placeholder = state.settings.model || Gemini.DEFAULT_MODEL;
+        $('aiModelCustom').focus();
+        return;
+      }
+      show($('aiModelCustomBox'), false);
+      state.settings = Gemini.update({ model: value });
+    });
+
+    $('aiModelCustom').addEventListener('change', function (event) {
+      var model = Gemini.normalizeModel(event.target.value);
+      event.target.value = model;
+      state.settings = Gemini.update({ model: model });
+      syncModelSelect();
+      toast('모델: ' + model);
     });
 
     $('toggleAuto').addEventListener('change', function (event) {
@@ -1524,6 +1541,28 @@
 
   /* ══════════════════════════════════ 시작 ══════════════════════════════════ */
 
+  var CUSTOM_MODEL = '__custom__';
+
+  /* 저장된 모델이 목록에 없어도(구형·직접 입력) 그 값을 목록에 끼워 넣고 그대로 선택한다. */
+  function syncModelSelect() {
+    var select = $('aiModel');
+    var current = Gemini.normalizeModel((state.settings || Gemini.settings()).model);
+    var known = false;
+    var extras = select.querySelectorAll('option[data-extra]');
+    for (var j = 0; j < extras.length; j++) select.removeChild(extras[j]);
+    for (var i = 0; i < Gemini.MODELS.length; i++) {
+      if (Gemini.MODELS[i].id === current) known = true;
+    }
+    if (!known) {
+      var extra = el('option', null, current + ' (직접 입력)');
+      extra.value = current;
+      extra.setAttribute('data-extra', '1');
+      select.appendChild(extra);
+    }
+    select.value = current;
+    show($('aiModelCustomBox'), false);
+  }
+
   function initModelSelect() {
     var select = $('aiModel');
     clear(select);
@@ -1532,7 +1571,10 @@
       opt.value = model.id;
       select.appendChild(opt);
     });
-    select.value = Gemini.settings().model;
+    var custom = el('option', null, '직접 입력…');
+    custom.value = CUSTOM_MODEL;
+    select.appendChild(custom);
+    syncModelSelect();
   }
 
   document.addEventListener('DOMContentLoaded', function () {

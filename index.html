@@ -281,6 +281,11 @@
           <span class="field-label">모델</span>
           <select id="aiModel"></select>
         </label>
+        <label class="field" id="aiModelCustomBox" hidden>
+          <span class="field-label">모델 ID 직접 입력</span>
+          <input id="aiModelCustom" type="text" placeholder="gemini-3.8-flash" autocomplete="off" spellcheck="false" />
+          <p class="fine-print">새 모델이 나왔는데 목록에 없으면 Google 문서의 모델 코드를 그대로 넣어 주세요.</p>
+        </label>
         <div id="sessionKeyBox">
           <label class="field">
             <span class="field-label">Gemini API 키 (임시)</span>

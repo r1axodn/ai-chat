@@ -14,11 +14,38 @@
   var SETTINGS_KEY = 'squad.gemini.settings.v1';
   var ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/';
 
+  // 구글이 새 모델을 내면 이 목록만 고치면 된다. 저장된 모델명이 목록에 없어도 그대로 쓴다.
+  var DEFAULT_MODEL = 'gemini-3.8-flash';
+
   var MODELS = [
-    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-    { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-    { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' }
+    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+    { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
+    { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite' },
+    { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite' },
+    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (구형)' },
+    { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (구형)' }
   ];
+
+  /* 'models/gemini-3.8-flash' 처럼 들어와도 받아 준다. 빈 값이면 기본 모델. */
+  function normalizeModel(model) {
+    var m = String(model == null ? '' : model).trim().replace(/^models\//i, '').trim();
+    return m || DEFAULT_MODEL;
+  }
+
+  /* Gemini 3 이상은 temperature 대신 thinkingLevel 을 쓰고, 생각 토큰이 출력 한도에 포함된다. */
+  function isThinkingModel(model) {
+    return /^gemini-([34])([.\-]|$)/i.test(normalizeModel(model));
+  }
+
+  function generationConfigFor(model) {
+    if (isThinkingModel(model)) {
+      return {
+        maxOutputTokens: 1024,
+        thinkingConfig: { thinkingLevel: 'low' }
+      };
+    }
+    return { temperature: 0.9, maxOutputTokens: 220, topP: 0.95 };
+  }
 
   function readSettings() {
     try {
@@ -26,12 +53,12 @@
       var v = raw ? JSON.parse(raw) : {};
       return {
         mode: v.mode || 'mock',
-        model: v.model || 'gemini-2.5-flash',
+        model: normalizeModel(v.model),
         autoReply: v.autoReply !== false,
         aiToAi: !!v.aiToAi
       };
     } catch (e) {
-      return { mode: 'mock', model: 'gemini-2.5-flash', autoReply: true, aiToAi: false };
+      return { mode: 'mock', model: DEFAULT_MODEL, autoReply: true, aiToAi: false };
     }
   }
 
@@ -79,13 +106,13 @@
 
   function callGemini(opts) {
     var key = opts.key;
-    var model = opts.model || 'gemini-2.5-flash';
+    var model = normalizeModel(opts.model);
     var url = ENDPOINT + encodeURIComponent(model) + ':generateContent';
     var body = {
-      systemInstruction: { parts: [{ text: opts.system || '' }] },
       contents: [{ role: 'user', parts: [{ text: opts.prompt }] }],
-      generationConfig: { temperature: 0.9, maxOutputTokens: 220, topP: 0.95 }
+      generationConfig: generationConfigFor(model)
     };
+    if (opts.system) body.systemInstruction = { parts: [{ text: opts.system }] };
     return fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
@@ -104,9 +131,20 @@
       })
       .then(function (json) {
         var cand = json && json.candidates && json.candidates[0];
-        var part = cand && cand.content && cand.content.parts && cand.content.parts[0];
-        var text = part && part.text ? String(part.text).trim() : '';
-        if (!text) throw new Error('empty_response');
+        var parts = (cand && cand.content && cand.content.parts) || [];
+        var text = parts
+          .filter(function (p) { return p && !p.thought && p.text; })
+          .map(function (p) { return String(p.text); })
+          .join('')
+          .trim();
+        if (!text) {
+          var blocked = json && json.promptFeedback && json.promptFeedback.blockReason;
+          var finish = cand && cand.finishReason;
+          if (blocked) throw new Error('안전 필터에 걸렸어요 (' + blocked + ')');
+          if (finish === 'MAX_TOKENS') throw new Error('응답이 잘렸어요 (MAX_TOKENS). 다른 모델로 바꿔 보세요.');
+          if (finish && finish !== 'STOP') throw new Error('응답이 비었어요 (' + finish + ')');
+          throw new Error('empty_response');
+        }
         return text.replace(/^["'“”]|["'“”]$/g, '').slice(0, 400);
       });
   }
@@ -252,6 +290,8 @@
 
   global.SquadGemini = {
     MODELS: MODELS,
+    DEFAULT_MODEL: DEFAULT_MODEL,
+    normalizeModel: normalizeModel,
     settings: readSettings,
     update: writeSettings,
     sessionKey: sessionKey,

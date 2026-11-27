@@ -67,7 +67,9 @@ supabase functions deploy gemini-chat --project-ref <프로젝트ref>
 supabase secrets set GEMINI_API_KEY=AIza... --project-ref <프로젝트ref>
 ```
 
-- 모델: `gemini-2.5-flash` / `gemini-2.0-flash` / `gemini-2.5-flash-lite`
+- 모델: **`gemini-3.8-flash` 가 기본**이고 `gemini-3.6-flash` / `gemini-3.5-flash-lite` / `gemini-3.1-flash-lite`, 구형 호환용으로 `gemini-2.5-flash` / `gemini-2.5-flash-lite` 를 고를 수 있습니다. 목록에 없는 모델은 **[모델 → 직접 입력…]** 에 모델 코드를 넣으면 그대로 씁니다.
+- `gemini-2.5-flash`·`gemini-2.5-pro` 는 이미 신규 키에서 막혀 있고(2026-12-01 부터는 `gemini-3.5-flash-lite`·`gemini-3.8-flash` 로 자동 연결), 그대로 부르면 *This model … is no longer available to new users* 오류가 납니다. 그래서 기본값을 3.8 Flash 로 두었습니다.
+- Gemini 3 계열은 `temperature` 대신 `generationConfig.thinkingConfig.thinkingLevel: 'low'` 를 쓰고, 생각 토큰이 출력 한도에 포함되므로 `maxOutputTokens` 를 1024 로 잡습니다. (구형 2.5 계열은 기존처럼 temperature·topP, 220 토큰)
 - 실사용은 **서버 함수 모드**를 권장합니다. 키가 브라우저로 나가지 않고, 함수가 요청 크기·모델·호출량(분당 30회)을 제한합니다.
 - Gemini 무료 등급 안에서 쓰면 비용은 0원이고, 초과하면 Google Cloud 결제가 필요합니다.
 
@@ -123,6 +125,7 @@ https://<주소>/?invite=s1.<tokenId>.<wrapKey>
 - 초대 폐기 후 링크 차단 / 암호 5회 실패 시 15분 잠금
 - 데스크톱(1280×900) 가운데 프레임
 - [방 관리 → 연결] 주소 끝 `/` 자동 제거 · `config.js` 에 공개 키만 있는지 확인
+- 모델 기본값 `Gemini 3.8 Flash` · 요청 URL `…/v1beta/models/gemini-3.8-flash:generateContent` · Gemini 3 요청에 `thinkingConfig.thinkingLevel=low` 가 들어가고 temperature 는 빠지는지 (가짜 fetch 로 본문 검사)
 - 콘솔 에러 0건
 
 `test/live_tests.py` (로컬 흉내 Supabase 서버): 실시간 모드 입장 · 초대 · 서버 복원 · 암호문 저장 등 24개 확인 통과.

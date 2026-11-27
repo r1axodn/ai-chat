@@ -11,11 +11,33 @@
 
 const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/";
 
+// 구글이 새 모델을 내면 여기만 고치면 된다. 그 밖의 모델명은 거부하고 기본값으로 돌린다.
+const DEFAULT_MODEL = "gemini-3.8-flash";
+
 const ALLOWED_MODELS = new Set([
+  "gemini-3.8-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
   "gemini-2.5-flash",
-  "gemini-2.0-flash",
   "gemini-2.5-flash-lite",
 ]);
+
+// Gemini 3 이상은 temperature 대신 thinkingLevel 을 쓰고, 생각 토큰이 출력 한도에 포함된다.
+function isThinkingModel(model: string): boolean {
+  return /^gemini-([34])([.\-]|$)/i.test(model);
+}
+
+function generationConfig(model: string, temperature: unknown) {
+  if (isThinkingModel(model)) {
+    return { maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: "low" } };
+  }
+  return {
+    temperature: typeof temperature === "number" ? Math.min(1.5, Math.max(0, temperature)) : 0.9,
+    maxOutputTokens: 220,
+    topP: 0.95,
+  };
+}
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -51,6 +73,18 @@ function clampText(value: unknown, max: number): string {
   return value.slice(0, max);
 }
 
+/* Google 오류 본문에서 사용자에게 보여 줄 message 만 꺼낸다 (모델명 오타·미지원 모델 안내용). */
+function modelErrorMessage(detail: string): string {
+  try {
+    const parsed = JSON.parse(detail);
+    const message = parsed?.error?.message;
+    if (typeof message !== "string") return "";
+    return message.replace(/\s+/g, " ").trim().slice(0, 240);
+  } catch {
+    return "";
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -77,7 +111,8 @@ Deno.serve(async (req: Request) => {
     return json({ error: "bad_json" }, 400);
   }
 
-  const model = ALLOWED_MODELS.has(payload?.model) ? payload.model : "gemini-2.5-flash";
+  const requested = typeof payload?.model === "string" ? payload.model.replace(/^models\//i, "") : "";
+  const model = ALLOWED_MODELS.has(requested) ? requested : DEFAULT_MODEL;
   const system = clampText(payload?.system, MAX_SYSTEM_CHARS);
   const prompt = clampText(payload?.prompt, MAX_PROMPT_CHARS);
   if (!prompt.trim()) return json({ error: "empty_prompt" }, 400);
@@ -85,13 +120,7 @@ Deno.serve(async (req: Request) => {
   const body = {
     systemInstruction: system ? { parts: [{ text: system }] } : undefined,
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: typeof payload?.temperature === "number"
-        ? Math.min(1.5, Math.max(0, payload.temperature))
-        : 0.9,
-      maxOutputTokens: 220,
-      topP: 0.95,
-    },
+    generationConfig: generationConfig(model, payload?.temperature),
     safetySettings: [
       { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
       { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
@@ -107,9 +136,14 @@ Deno.serve(async (req: Request) => {
 
     if (!res.ok) {
       const detail = await res.text();
-      // 키나 내부 사정은 그대로 흘리지 않는다
+      // 키나 내부 사정은 그대로 흘리지 않는다. 다만 모델명·요청 오류(400/404)는 사용자가 고칠 수 있게 문구만 전달한다.
       console.error("gemini_error", res.status, detail.slice(0, 400));
-      return json({ error: res.status === 429 ? "quota_exceeded" : "gemini_failed" }, 502);
+      if (res.status === 429) return json({ error: "quota_exceeded" }, 502);
+      if (res.status === 400 || res.status === 404) {
+        const passed = modelErrorMessage(detail);
+        if (passed) return json({ error: passed }, 502);
+      }
+      return json({ error: "gemini_failed" }, 502);
     }
 
     const data = await res.json();
