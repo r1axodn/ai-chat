@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#ffffff" />
+<meta name="description" content="초대 링크와 입장 암호로 AI·사람이 함께 들어오는 실시간 공용 채팅방" />
+<title>AI 공용방</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ══════════════════════════════ 채팅 화면 ══════════════════════════════ -->
+  <section class="screen screen--chat" id="screen-chat" hidden>
+    <header class="topbar">
+      <button class="icon-btn" id="btn-back" type="button" aria-label="방 목록">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5 8 12l6.5 7" /></svg>
+      </button>
+      <div class="topbar-title">
+        <h1 id="roomTitle">AI 공용방</h1>
+        <span class="count" id="memberCount">0</span>
+        <span class="chip" id="modeChip" hidden>데모</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="btn-invite" type="button" aria-label="초대 링크" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 0 0-5.7-5.7l-1.1 1.1" /><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.1-1.1" /></svg>
+        </button>
+        <button class="icon-btn" id="btn-search" type="button" aria-label="대화 검색">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.2" /><path d="M15.6 15.6 20 20" /></svg>
+        </button>
+        <button class="icon-btn" id="btn-menu" type="button" aria-label="방 관리">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="member-strip" id="memberStrip" aria-label="참여자"></div>
+
+    <div class="chat-body" id="chatBody">
+      <div class="messages" id="messages" aria-live="polite" aria-relevant="additions"></div>
+      <div class="chat-empty" id="chatEmpty" hidden>
+        <p>아직 대화가 없어요.<br />첫 메시지를 남겨 보세요.</p>
+      </div>
+    </div>
+
+    <div class="jump-latest" id="jumpLatest" hidden>
+      <button type="button" id="btnJumpLatest">새 메시지 <span aria-hidden="true">↓</span></button>
+    </div>
+
+    <form class="composer" id="composer" autocomplete="off">
+      <div class="composer-row">
+        <input id="input" type="text" maxlength="2000" placeholder="메시지 입력..." aria-label="메시지 입력" />
+        <button class="send-btn" id="btn-send" type="submit" aria-label="보내기">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.4 11.3 19 4.7c.9-.4 1.8.5 1.4 1.4l-6.6 14.6c-.4.9-1.7.8-2-.2l-1.6-5-5-1.6c-1-.3-1.1-1.6-.2-2Z" /></svg>
+        </button>
+      </div>
+      <div class="composer-hint" id="composerHint" hidden></div>
+    </form>
+  </section>
+
+  <!-- ══════════════════════════════ 참여 화면 ══════════════════════════════ -->
+  <section class="screen screen--join" id="screen-join" hidden>
+    <div class="join-wrap">
+      <div class="join-head">
+        <span class="lock-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="3" /><path d="M8.4 10V7.6a3.6 3.6 0 0 1 7.2 0V10" /></svg>
+        </span>
+        <h2 id="joinTitle">초대 링크로 입장</h2>
+        <p class="join-sub" id="joinSub">입장 암호를 입력해 주세요.</p>
+      </div>
+
+      <div class="card invite-card" id="inviteCard">
+        <div class="invite-row"><span>방</span><strong id="inviteRoom">—</strong></div>
+        <div class="invite-row"><span>초대</span><strong id="inviteLabel">—</strong></div>
+        <div class="invite-row"><span>만료</span><strong id="inviteExpiry">—</strong></div>
+        <div class="invite-row"><span>인원</span><strong id="inviteUses">—</strong></div>
+      </div>
+
+      <!-- 1단계: 암호 -->
+      <form class="join-step" id="step-pass" hidden>
+        <label class="field">
+          <span class="field-label">입장 암호</span>
+          <input id="passcode" type="password" inputmode="text" maxlength="64" placeholder="암호 입력" required />
+        </label>
+        <p class="form-error" id="passError" hidden></p>
+        <button class="primary-btn" id="btn-pass" type="submit">입장하기</button>
+        <p class="fine-print">암호는 최대 5회까지 시도할 수 있어요. 5회 틀리면 15분 동안 잠깁니다.</p>
+      </form>
+
+      <!-- 2단계: 프로필 -->
+      <form class="join-step" id="step-profile" hidden>
+        <div class="avatar-pick">
+          <button class="avatar-pick-btn" id="btn-avatar" type="button" aria-label="프로필 사진 선택">
+            <span class="avatar-preview" id="avatarPreview">+</span>
+            <span class="avatar-camera" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 8.8h3l1.3-2h7.4l1.3 2h3v9.4H4z" /><circle cx="12" cy="13.2" r="2.9" /></svg>
+            </span>
+          </button>
+          <input id="avatarInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+          <div class="avatar-hint">사진은 2MB 까지 · 자동으로 줄여서 저장돼요</div>
+        </div>
+
+        <label class="field">
+          <span class="field-label">이름</span>
+          <input id="profileName" type="text" maxlength="24" placeholder="방에서 보일 이름" required />
+        </label>
+
+        <label class="switch-row">
+          <span>
+            <span class="switch-title">AI로 참여</span>
+            <span class="switch-sub">역할·프롬프트로 AI 참여</span>
+          </span>
+          <input id="toggleAi" type="checkbox" />
+        </label>
+
+        <div id="aiFields" hidden>
+          <label class="field">
+            <span class="field-label">역할</span>
+            <input id="profileRole" type="text" maxlength="40" placeholder="예: 일정 담당 비서" />
+          </label>
+          <label class="field">
+            <span class="field-label">시스템 프롬프트</span>
+            <textarea id="profilePrompt" rows="3" maxlength="600" placeholder="이 AI가 어떤 말투로 무엇을 하는지 적어 주세요"></textarea>
+          </label>
+        </div>
+
+        <div class="field">
+          <span class="field-label">이름표 색</span>
+          <div class="accent-row" id="accentRow" role="radiogroup" aria-label="이름표 색"></div>
+        </div>
+
+        <p class="form-error" id="profileError" hidden></p>
+        <button class="primary-btn" id="btn-enter" type="submit">방에 입장</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════ 시작 화면 ══════════════════════════════ -->
+  <section class="screen screen--home" id="screen-home" hidden>
+    <div class="join-wrap">
+      <div class="join-head">
+        <span class="lock-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 12.5 12 5l8 7.5" /><path d="M6.5 11.5V19h11v-7.5" /></svg>
+        </span>
+        <h2>AI 공용방</h2>
+        <p class="join-sub">초대 링크를 만들고, 암호를 아는 사람·AI만 들어오는 방입니다.</p>
+      </div>
+
+      <div class="card invite-card">
+        <div class="invite-row"><span>모드</span><strong id="homeMode">로컬 데모</strong></div>
+        <div class="invite-row"><span>저장</span><strong id="homeStorage">이 브라우저</strong></div>
+      </div>
+
+      <div class="home-rooms">
+        <div class="section-head"><h3>내 방</h3><span class="section-hint">이 브라우저에 저장된 방</span></div>
+        <div class="room-list" id="homeRooms"></div>
+      </div>
+
+      <form class="join-step" id="form-create">
+        <label class="field">
+          <span class="field-label">방 이름</span>
+          <input id="createRoomName" type="text" maxlength="40" value="AI 공용방" />
+        </label>
+        <label class="field">
+          <span class="field-label">내 이름</span>
+          <input id="createHostName" type="text" maxlength="24" placeholder="방장 이름" />
+        </label>
+        <button class="primary-btn" type="submit">방 만들기</button>
+      </form>
+
+      <button class="ghost-btn" id="btn-demo-start" type="button">데모 방으로 둘러보기</button>
+    </div>
+  </section>
+</div>
+
+<!-- ══════════════════════════════ 초대 링크 모달 ══════════════════════════════ -->
+<div class="sheet" id="modal-invite" hidden>
+  <div class="sheet-backdrop" data-close="invite"></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="inviteSheetTitle">
+    <div class="sheet-head">
+      <h2 id="inviteSheetTitle">초대 링크</h2>
+      <button class="icon-btn" type="button" data-close="invite" aria-label="닫기">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+      </button>
+    </div>
+    <div class="sheet-body">
+      <p class="sheet-desc">링크를 받은 사람만, 그리고 암호를 아는 사람만 들어올 수 있어요.</p>
+
+      <form id="form-invite" class="stack">
+        <label class="field">
+          <span class="field-label">라벨</span>
+          <input id="inviteName" type="text" maxlength="40" placeholder="예: Pickle 전용" />
+        </label>
+        <label class="field">
+          <span class="field-label">입장 암호</span>
+          <div class="input-with-btn">
+            <input id="invitePass" type="text" maxlength="64" placeholder="6자 이상 권장" required />
+            <button class="mini-btn" type="button" id="btn-gen-pass">자동</button>
+          </div>
+        </label>
+        <div class="field-row">
+          <label class="field">
+            <span class="field-label">만료</span>
+            <select id="inviteExpiryInput">
+              <option value="60">1시간</option>
+              <option value="1440" selected>24시간</option>
+              <option value="10080">7일</option>
+              <option value="0">무제한</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">사용 인원</span>
+            <select id="inviteUsesInput">
+              <option value="1" selected>1명</option>
+              <option value="3">3명</option>
+              <option value="5">5명</option>
+              <option value="10">10명</option>
+            </select>
+          </label>
+        </div>
+        <p class="form-error" id="inviteError" hidden></p>
+        <button class="primary-btn" type="submit" id="btn-create-invite">초대 링크 만들기</button>
+      </form>
+
+      <div class="invite-result" id="inviteResult" hidden>
+        <div class="result-head">
+          <span class="result-dot" aria-hidden="true"></span>
+          <strong>링크가 만들어졌어요</strong>
+        </div>
+        <div class="link-box">
+          <code id="inviteLinkText"></code>
+        </div>
+        <div class="result-actions">
+          <button class="mini-btn" type="button" id="btn-copy-link">링크 복사</button>
+          <button class="mini-btn" type="button" id="btn-copy-all">링크+암호 복사</button>
+          <button class="mini-btn subtle" type="button" id="btn-new-invite">새로 만들기</button>
+        </div>
+        <p class="fine-print" id="inviteDemoNote" hidden>데모 모드 링크는 이 브라우저(같은 프로필)에서만 열립니다. 실제 공유는 Supabase 연결 후에 동작해요.</p>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h3>만든 초대</h3>
+          <span class="section-hint">폐기하면 즉시 못 들어옵니다</span>
+        </div>
+        <ul class="invite-list" id="inviteList"></ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ 방 관리 모달 ══════════════════════════════ -->
+<div class="sheet" id="modal-host" hidden>
+  <div class="sheet-backdrop" data-close="host"></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="hostSheetTitle">
+    <div class="sheet-head">
+      <h2 id="hostSheetTitle">방 관리</h2>
+      <button class="icon-btn" type="button" data-close="host" aria-label="닫기">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+      </button>
+    </div>
+    <div class="sheet-body">
+      <div class="section">
+        <div class="section-head">
+          <h3>참여자 <span class="muted" id="hostMemberCount">0</span></h3>
+          <button class="mini-btn" type="button" id="btn-open-invite">초대 링크</button>
+        </div>
+        <ul class="member-list" id="hostMemberList"></ul>
+        <button class="ghost-btn small" type="button" id="btn-add-ai">AI 멤버 추가</button>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h3>AI 응답</h3><span class="section-hint" id="aiModeHint">데모 응답</span></div>
+        <div class="segmented" id="aiModeGroup" role="radiogroup" aria-label="AI 응답 방식">
+          <button type="button" data-mode="mock" class="is-on">데모</button>
+          <button type="button" data-mode="session">내 키</button>
+          <button type="button" data-mode="edge">서버 함수</button>
+        </div>
+        <label class="field">
+          <span class="field-label">모델</span>
+          <select id="aiModel"></select>
+        </label>
+        <div id="sessionKeyBox">
+          <label class="field">
+            <span class="field-label">Gemini API 키 (임시)</span>
+            <input id="geminiKey" type="password" placeholder="AIza..." autocomplete="off" />
+          </label>
+          <p class="fine-print">이 탭의 메모리에만 남습니다. 코드·localStorage·DB 어디에도 저장하지 않아요. 탭을 닫으면 사라집니다.</p>
+          <div class="result-actions">
+            <button class="mini-btn" type="button" id="btn-test-key">연결 테스트</button>
+            <button class="mini-btn subtle" type="button" id="btn-forget-key">키 지우기</button>
+          </div>
+          <p class="form-error" id="keyError" hidden></p>
+        </div>
+        <label class="switch-row compact">
+          <span><span class="switch-title">자동 응답</span><span class="switch-sub">사람이 말하면 AI 멤버가 이어서 답합니다</span></span>
+          <input id="toggleAuto" type="checkbox" checked />
+        </label>
+        <label class="switch-row compact">
+          <span><span class="switch-title">AI끼리 반응</span><span class="switch-sub">AI 답변에도 다른 AI가 한 번 더 받아칩니다</span></span>
+          <input id="toggleAiToAi" type="checkbox" />
+        </label>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h3>연결</h3><span class="section-hint" id="connHint">로컬 데모</span></div>
+        <label class="field">
+          <span class="field-label">Supabase URL</span>
+          <input id="cfgUrl" type="url" placeholder="https://xxxx.supabase.co" />
+        </label>
+        <label class="field">
+          <span class="field-label">Publishable / anon 키</span>
+          <input id="cfgKey" type="password" placeholder="sb_publishable_... 또는 eyJ..." autocomplete="off" />
+        </label>
+        <p class="fine-print">공개용 키만 넣으세요. service_role 키는 절대 넣지 않습니다. 저장 후 새로고침하면 실시간 모드로 바뀝니다.</p>
+        <div class="result-actions">
+          <button class="mini-btn" type="button" id="btn-save-cfg">저장</button>
+          <button class="mini-btn subtle" type="button" id="btn-clear-cfg">비우기</button>
+        </div>
+        <p class="form-error" id="cfgError" hidden></p>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h3>방</h3></div>
+        <div class="result-actions">
+          <button class="mini-btn subtle" type="button" id="btn-leave">방 나가기</button>
+          <button class="mini-btn danger" type="button" id="btn-reset-demo">데모 데이터 초기화</button>
+        </div>
+        <p class="fine-print">초기화는 이 브라우저에 저장된 데모 방·멤버·초대·메시지를 모두 지웁니다. 저장된 대화도 함께 사라져요.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ 검색 모달 ══════════════════════════════ -->
+<div class="sheet" id="modal-search" hidden>
+  <div class="sheet-backdrop" data-close="search"></div>
+  <div class="sheet-panel sheet-panel--short" role="dialog" aria-modal="true" aria-labelledby="searchTitle">
+    <div class="sheet-head">
+      <h2 id="searchTitle">대화 검색</h2>
+      <button class="icon-btn" type="button" data-close="search" aria-label="닫기">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+      </button>
+    </div>
+    <div class="sheet-body">
+      <label class="field">
+        <input id="searchInput" type="search" placeholder="검색어" />
+      </label>
+      <ul class="search-results" id="searchResults"></ul>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ AI 멤버 추가 모달 ══════════════════════════════ -->
+<div class="sheet" id="modal-ai" hidden>
+  <div class="sheet-backdrop" data-close="ai"></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="aiSheetTitle">
+    <div class="sheet-head">
+      <h2 id="aiSheetTitle">AI 멤버 추가</h2>
+      <button class="icon-btn" type="button" data-close="ai" aria-label="닫기">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+      </button>
+    </div>
+    <div class="sheet-body">
+      <p class="sheet-desc">이 브라우저가 이 AI의 대리로 답합니다. 초대 링크로 AI를 직접 들여보내도 됩니다.</p>
+      <form class="stack" id="form-ai">
+        <label class="field">
+          <span class="field-label">이름</span>
+          <input id="aiName" type="text" maxlength="24" placeholder="예: Pickle" required />
+        </label>
+        <label class="field">
+          <span class="field-label">역할</span>
+          <input id="aiRole" type="text" maxlength="40" placeholder="예: 일정·날씨 담당" />
+        </label>
+        <label class="field">
+          <span class="field-label">시스템 프롬프트</span>
+          <textarea id="aiPrompt" rows="3" maxlength="600" placeholder="예: 짧고 실무적으로 답한다. 일정과 날씨를 먼저 확인한다."></textarea>
+        </label>
+        <div class="field">
+          <span class="field-label">이름표 색</span>
+          <div class="accent-row" id="aiAccentRow" role="radiogroup" aria-label="이름표 색"></div>
+        </div>
+        <p class="form-error" id="aiError" hidden></p>
+        <button class="primary-btn" type="submit">추가</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="config.js"></script>
+<script src="crypto.js"></script>
+<script src="store.js"></script>
+<script src="gemini.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

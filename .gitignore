@@ -1,0 +1,10 @@
+# 검증 스크립트와 미리보기 이미지는 배포 대상이 아닙니다
+test/
+preview-*.png
+
+# OS / 편집기
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
