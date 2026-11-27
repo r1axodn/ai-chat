@@ -1,7 +1,8 @@
 /*!
  * gemini.js — Gemini 응답 엔진 (3가지 모드)
  *
- *  mock    : API 키 없이 도는 데모 응답. 대화 흐름에 맞춰 짧게 답한다.
+ *  mock    : 키·서버 함수가 없는 '데모' 상태. 자동 응답을 보내지 않는다.
+ *            (예전처럼 예시 문장을 대신 찍어내지 않는다 — 자동 응답 기본값 OFF)
  *  session : 방장이 화면에서 임시로 넣은 키를 sessionStorage(=탭 메모리)에만 두고
  *            브라우저 → Google Gemini REST 로 직접 호출한다. 코드·DB·localStorage 에는 남기지 않는다.
  *  edge    : 배포된 Supabase Edge Function(supabase/functions/gemini-chat)을 호출한다.
@@ -80,11 +81,19 @@
     var next = {
       mode: v.mode || 'mock',
       model: model,
-      autoReply: v.autoReply !== false,
-      aiToAi: !!v.aiToAi,
-      modelMigrated: migrated
+      autoReply: v.autoReply === true,
+      aiToAi: v.aiToAi === true,
+      modelMigrated: migrated,
+      autoReplyDefault: v.autoReplyDefault === true
     };
-    if (v.modelMigrated !== true) {
+    // 자동 응답·AI끼리 반응은 기본 OFF. 예전 기본값(ON)이 저장돼 있던 브라우저도 한 번만 OFF로 맞춘다.
+    // 한 번 맞춘 뒤에 사용자가 직접 켜면 그 선택은 건드리지 않는다.
+    if (next.autoReplyDefault !== true) {
+      next.autoReply = false;
+      next.aiToAi = false;
+      next.autoReplyDefault = true;
+    }
+    if (v.modelMigrated !== true || v.autoReplyDefault !== true) {
       try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
       } catch (e) {
@@ -207,62 +216,16 @@
       });
   }
 
-  /* ------------------------------------------------------------ 데모 응답 */
+  /* ------------------------------------------------------------ 자동 응답 가능 여부
+   *  데모(mock) 상태에서는 예시 문장을 대신 보내지 않는다.
+   *  진짜 Gemini 키(내 키 모드 + 키 있음) 또는 서버 함수(edge + 배포 URL)일 때만 답한다.
+   */
 
-  var MOCK = {
-    generic: [
-      '확인했어요. 바로 정리해 둘게요.',
-      '좋아요, 그 방향으로 맞춰 볼게요.',
-      '일정이랑 같이 보면 무리 없어 보여요.',
-      '두 가지로 나눠서 짧게 정리해 봤어요.',
-      '제 쪽은 준비 끝났어요.'
-    ],
-    question: [
-      '네, 지금 확인해 볼게요.',
-      '그건 제가 맡아서 확인해 볼 수 있어요.',
-      '한 번 더 확인하고 바로 알려드릴게요.'
-    ],
-    plan: [
-      '그럼 순서는 정리 → 확인 → 공유로 가면 되겠네요.',
-      '제가 체크리스트로 묶어서 올려 둘게요.',
-      '시간 넉넉해요. 그 순서면 문제없습니다.'
-    ],
-    greeting: [
-      '안녕하세요, 준비돼 있어요.',
-      '부르셨나요? 바로 볼게요.'
-    ],
-    persona: {
-      Pickle: ['일정 쪽은 제가 챙길게요.', '방금 캘린더랑 겹치는 거 없이 확인했어요.', '제가 정리해서 올려 둘게요.'],
-      Instinct: ['링크랑 준비물은 제가 최신으로 맞춰 뒀어요.', '신청 쪽은 문제없어 보여요.', '리스트 다시 한 번 훑어볼게요.'],
-      Claude: ['비교표로 묶어서 보여드릴게요.', '요약은 짧게 정리했습니다.', '장단점 두 줄로 정리해 봤어요.']
-    }
-  };
-
-  function pick(list, seed) {
-    var i = Math.abs(hash(seed || '')) % list.length;
-    return list[i];
-  }
-
-  function hash(text) {
-    var h = 0;
-    for (var i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
-    return h;
-  }
-
-  function mockReply(opts) {
-    var last = (opts.history || []).filter(function (m) {
-      return m.author_kind !== 'ai';
-    }).pop();
-    var text = last ? last.text : '';
-    var persona = MOCK.persona[opts.name] || null;
-    var bank;
-    if (/[?？]\s*$/.test(text)) bank = MOCK.question;
-    else if (/(하자|할까|어때|계획|일정|언제|몇 시)/.test(text)) bank = MOCK.plan;
-    else if (/(안녕|하이|반가)/.test(text)) bank = MOCK.greeting;
-    else bank = MOCK.generic;
-    if (persona && Math.random() < 0.6) bank = persona;
-    var seed = opts.name + '|' + text + '|' + (opts.history || []).length;
-    return Promise.resolve(pick(bank, seed));
+  function canAutoReply(opts) {
+    var settings = readSettings();
+    if (settings.mode === 'session') return !!sessionKey();
+    if (settings.mode === 'edge') return !!(opts && opts.edgeUrl);
+    return false;
   }
 
   /* ------------------------------------------------------------ 공개 API */
@@ -296,9 +259,8 @@
         return { text: text, source: 'gemini' };
       });
     }
-    return mockReply(opts).then(function (text) {
-      return { text: text, source: 'mock' };
-    });
+    // 데모 상태: 가짜 예시 문장을 대신 보내지 않는다.
+    return Promise.reject(new Error('데모 모드에서는 자동으로 답하지 않아요'));
   }
 
   function testKey(opts) {
@@ -329,6 +291,7 @@
     sessionKey: sessionKey,
     setSessionKey: setSessionKey,
     reply: reply,
+    canAutoReply: canAutoReply,
     testKey: testKey
   };
 })(typeof window !== 'undefined' ? window : this);

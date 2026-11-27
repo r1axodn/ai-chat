@@ -654,7 +654,7 @@
     }).length;
     if (state.mode === 'demo') {
       hint.textContent = aiCount
-        ? '데모 모드 · AI 응답은 예시 문장이에요. 대화는 이 브라우저에 저장됩니다.'
+        ? '데모 모드 · 자동 응답은 꺼져 있어요(예시 문장을 대신 보내지 않습니다). 대화는 이 브라우저에 저장됩니다.'
         : '데모 모드 · 대화는 이 브라우저에 저장됩니다.';
       show(hint, true);
     } else {
@@ -672,9 +672,17 @@
     });
   }
 
+  /* 실제 AI가 답할 수 있는 상태인가 (데모 = 키·서버 함수 없음) */
+  function edgeUrlFor() {
+    return state.store && state.store.mode === 'live' ? state.store.url + '/functions/v1/gemini-chat' : '';
+  }
+
   function scheduleAiReplies(trigger) {
     var settings = Gemini.settings();
     if (!settings.autoReply) return;
+    // 데모(키 없음) 상태에서는 사람이 말해도 예시 문장을 자동 발송하지 않는다.
+    // 진짜 Gemini(내 키·서버 함수)일 때만 답한다.
+    if (!Gemini.canAutoReply({ edgeUrl: edgeUrlFor() })) return;
     if (trigger.author_kind === 'ai') {
       if (!settings.aiToAi) return;
       if ((trigger.depth || 0) >= 1) return;
@@ -728,7 +736,7 @@
         system: (member.system_prompt || '') + ' 지금은 "' + (state.room.name || 'AI 공용방') + '" 단체 채팅방에 있다.',
         history: history,
         roomName: state.room.name,
-        edgeUrl: state.store.mode === 'live' ? state.store.url + '/functions/v1/gemini-chat' : '',
+        edgeUrl: edgeUrlFor(),
         projectKey: state.store.mode === 'live' ? state.store.key : ''
       });
       removeTypingEl(member.id);
@@ -1495,7 +1503,7 @@
     renderHostMembers();
     $('hostMemberCount').textContent = '(' + state.members.length + ')';
     syncModelSelect();
-    $('toggleAuto').checked = state.settings.autoReply !== false;
+    $('toggleAuto').checked = !!state.settings.autoReply;
     $('toggleAiToAi').checked = !!state.settings.aiToAi;
     show($('sessionKeyBox'), state.settings.mode === 'session');
     $('geminiKey').value = '';
@@ -1524,7 +1532,11 @@
     $('cfgKey').value = '';
     $('cfgKey').placeholder = cfg.supabaseKey ? '저장된 키가 있어요' : 'sb_publishable_...';
     $('aiModeHint').textContent =
-      state.settings.mode === 'mock' ? '데모 응답' : state.settings.mode === 'session' ? '내 키 사용' : '서버 함수';
+      state.settings.mode === 'mock'
+        ? '데모 (자동 응답 없음)'
+        : state.settings.mode === 'session'
+        ? '내 키 사용'
+        : '서버 함수';
     setSegmented($('aiModeGroup'), state.settings.mode);
     openSheet('host');
   }
@@ -1686,7 +1698,8 @@
       state.settings = Gemini.update({ mode: mode });
       setSegmented($('aiModeGroup'), mode);
       show($('sessionKeyBox'), mode === 'session' || (mode === 'edge' && Gemini.sessionKey()));
-      $('aiModeHint').textContent = mode === 'mock' ? '데모 응답' : mode === 'session' ? '내 키 사용' : '서버 함수';
+      $('aiModeHint').textContent = mode === 'mock' ? '데모 (자동 응답 없음)' : mode === 'session' ? '내 키 사용' : '서버 함수';
+      if (mode === 'mock') toast('데모 모드는 자동 응답을 보내지 않아요');
       if (mode === 'edge') toast('서버 함수 모드는 Supabase Edge Function 배포가 필요해요');
     });
 

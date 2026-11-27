@@ -59,7 +59,7 @@ python3 -m http.server 8000
 
 | 모드 | 동작 | 키 위치 |
 | --- | --- | --- |
-| **데모** | API 호출 없이 예시 문장으로 응답 | 없음 |
+| **데모** | 자동 응답 없음 (예시 문장을 대신 보내지 않음) | 없음 |
 | **내 키** | 브라우저 → Google Gemini REST 직접 호출 | 그 탭의 `sessionStorage` 에만 (코드·localStorage·DB 저장 없음) |
 | **서버 함수** | 브라우저 → Supabase Edge Function → Gemini | 함수 환경변수 `GEMINI_API_KEY` 에만 |
 
@@ -143,7 +143,7 @@ https://<주소>/?invite=s1.<tokenId>.<wrapKey>
 `test/run_tests.py` (Playwright, Chromium · iPhone 390×844 · DPR 2):
 
 - 데모 방 자동 생성 · 시드 대화 4개 · 멤버 4명
-- 메시지 전송 → AI 자동 응답(데모)
+- 메시지 전송 → 데모 모드에서는 가짜 자동 응답이 붙지 않음(자동 응답·AI끼리 반응 기본 OFF)
 - **새로고침 후 대화·멤버 유지**
 - **첫 화면 로그인**: 세션이 없으면 입장 화면 + AI 5종 칩 + 방 비밀번호 / `taewoo` + 비밀번호로 방장 로그인
 - **AI 프리셋**: 칩을 고르면 프로필 화면 없이 바로 입장·재입장(이름·공식 아이콘 자동 적용, 3번 들어와도 멤버 1개, 사용 횟수 그대로)
