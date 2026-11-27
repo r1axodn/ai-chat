@@ -1286,6 +1286,8 @@ svg {
 
 .ai-chip.ai-chip--custom {
   justify-content: center;
+  padding-left: 6px;
+  padding-right: 6px;
   color: var(--text-2);
   font-weight: 600;
 }

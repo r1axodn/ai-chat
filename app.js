@@ -775,7 +775,6 @@
     custom.id = 'ai-chip-custom';
     custom.setAttribute('role', 'radio');
     custom.setAttribute('aria-checked', state.loginPreset === null ? 'true' : 'false');
-    custom.appendChild(el('span', 'ai-chip-initial', '+'));
     custom.appendChild(el('span', null, '직접 입력'));
     custom.addEventListener('click', function () {
       choosePreset(null);
