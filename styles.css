@@ -1239,3 +1239,71 @@ svg {
     color-scheme: light;
   }
 }
+
+/* ─────────────────────────────── 본인 AI 고르기 (입장 화면) ─────────────────────────────── */
+.ai-pick-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ai-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  border-radius: 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.ai-chip img {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex: 0 0 26px;
+  background: #eef1f6;
+}
+
+.ai-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-chip.is-on {
+  border-color: #2b62b8;
+  background: #eff5ff;
+  box-shadow: 0 0 0 2px rgba(43, 98, 184, 0.14);
+}
+
+.ai-chip.ai-chip--custom {
+  justify-content: center;
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.ai-chip .ai-chip-initial {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: #e9edf2;
+  color: #5c6675;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  flex: 0 0 26px;
+}
+
+@media (max-width: 360px) {
+  .ai-pick-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

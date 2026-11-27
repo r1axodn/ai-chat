@@ -18,6 +18,18 @@
   var AVATAR_MAX_BYTES = 2 * 1024 * 1024;
   var AVATAR_SIZE = 160;
 
+  /* 다섯 AI 비서의 공식 아이콘(assets/avatars/)과 이름표 색 */
+  var AI_PRESETS = [
+    { id: 'pickle', name: '피클', accent: 'green', avatar: 'assets/avatars/pickle.webp', role: '피클(Pickle) AI 에이전트' },
+    { id: 'keyring', name: '키링', accent: 'orange', avatar: 'assets/avatars/keyring.webp', role: '키링(Keyring) AI 비서' },
+    { id: 'vooy', name: '부이', accent: 'purple', avatar: 'assets/avatars/vooy.webp', role: '부이(Vooy) AI 비서' },
+    { id: 'instinct', name: 'Instinct', accent: 'blue', avatar: 'assets/avatars/instinct.webp', role: 'Instinct AI' },
+    { id: 'qya', name: '큐야', accent: 'rose', avatar: 'assets/avatars/cue.webp', role: '큐야(Cue) AI 비서' }
+  ];
+
+  /* 데모 방(로컬) 비밀번호 — 실제 방 비밀번호는 코드에 넣지 않는다. */
+  var DEMO_ROOM_PASS = 'demo-1234';
+
   var state = {
     store: null,
     mode: 'demo',
@@ -31,6 +43,11 @@
     inviteInfo: null,
     joinToken: null,
     joinPasscode: '',
+    inviteFull: false,
+    loginMode: 'invite',
+    loginPreset: null,
+    loginRoom: null,
+    roomPassword: '',
     pendingAvatar: null,
     accent: 'blue',
     aiAccent: 'green',
@@ -108,6 +125,44 @@
     var hour = Math.round(min / 60);
     if (hour < 24) return hour + '시간 후 만료';
     return Math.round(hour / 24) + '일 후 만료';
+  }
+
+  /* 사용 인원: null(또는 0·빈 값) = 무제한. store.js 와 같은 규칙을 쓴다. */
+  function isUnlimitedUses(maxUses) {
+    if (Store && typeof Store.isUnlimitedUses === 'function') return Store.isUnlimitedUses(maxUses);
+    if (maxUses == null || maxUses === '') return true;
+    var n = Number(maxUses);
+    return !isFinite(n) || n <= 0;
+  }
+
+  function fmtUses(uses, maxUses) {
+    var u = Number(uses || 0);
+    if (isUnlimitedUses(maxUses)) return u + '명 사용 · 무제한';
+    return u + ' / ' + Number(maxUses) + '명';
+  }
+
+  /* 저장소(서버 스키마)가 이 기능을 지원하는지. 데모는 항상 지원한다. */
+  function supportsUnlimited() {
+    return !state.store || typeof state.store.supportsUnlimited !== 'function' || state.store.supportsUnlimited();
+  }
+
+  function supportsRejoin() {
+    return !state.store || typeof state.store.supportsRejoin !== 'function' || state.store.supportsRejoin();
+  }
+
+  function supportsRoomLogin() {
+    return !state.store || typeof state.store.supportsRoomLogin !== 'function' || state.store.supportsRoomLogin();
+  }
+
+  function presetById(id) {
+    for (var i = 0; i < AI_PRESETS.length; i++) {
+      if (AI_PRESETS[i].id === id) return AI_PRESETS[i];
+    }
+    return null;
+  }
+
+  function presetPrompt(preset) {
+    return '역할: ' + preset.role + '. 짧고 실무적으로 답한다.';
   }
 
   var toastTimer = null;
@@ -224,40 +279,51 @@
       return;
     }
 
+    var forceLogin = params.get('login') === '1';
     var session = Store.currentSession();
-    if (session && session.roomId) {
+    if (!forceLogin && session && session.roomId) {
       openRoom(session);
       return;
     }
 
-    if (state.mode === 'demo' && !localStorage.getItem('squad.demo.clean')) {
-      var seeded = await seedDemoRoom();
-      if (seeded) {
-        openRoom(seeded);
-        return;
-      }
-    }
-    showScreen('home');
+    // 세션이 없는 첫 방문·초기화된 브라우저 → 바로 로그인 화면
+    await startRoomLogin();
   }
 
   /* ══════════════════════════════════ 데모 씨앗 ══════════════════════════════════ */
 
-  async function seedDemoRoom() {
+  async function seedDemoRoom(opts) {
+    opts = opts || {};
     var room = await state.store.createRoom({ name: 'AI 공용방', hostName: 'Taewoo', accent: 'blue' });
+
+    // 데모 방 비밀번호 (로컬 데모 전용 상수 — 실제 방 비밀번호는 코드에 넣지 않는다)
+    try {
+      await state.store.setRoomPassword({
+        roomId: room.roomId,
+        hostToken: room.memberToken,
+        roomKey: room.roomKey,
+        passcode: DEMO_ROOM_PASS
+      });
+    } catch (e) {
+      /* 비밀번호를 못 걸어도 데모는 계속 */
+    }
+
     var presets = [
-      { name: 'Pickle', accent: 'green', role: '일정·날씨 담당', prompt: '일정과 날씨를 먼저 확인하고 짧게 보고한다.' },
-      { name: 'Instinct', accent: 'blue', role: '링크·준비물 담당', prompt: '신청 링크와 준비물을 정리해서 알려준다.' },
-      { name: 'Claude', accent: 'orange', role: '비교·요약 담당', prompt: '선택지를 비교표로 요약한다.' }
+      { preset: presetById('pickle'), role: '일정·날씨 담당', prompt: '일정과 날씨를 먼저 확인하고 짧게 보고한다.' },
+      { preset: presetById('keyring'), role: '링크·준비물 담당', prompt: '신청 링크와 준비물을 정리해서 알려준다.' },
+      { preset: presetById('instinct'), role: '비교·요약 담당', prompt: '선택지를 비교표로 요약한다.' }
     ];
     var aiTokens = [];
     for (var i = 0; i < presets.length; i++) {
       var p = presets[i];
+      var avatar = await presetAvatarDataUrl(p.preset.avatar);
       var added = await state.store.hostAddMember({
         roomId: room.roomId,
         hostToken: room.memberToken,
-        name: p.name,
+        name: p.preset.name,
         kind: 'ai',
-        accent: p.accent,
+        accent: p.preset.accent,
+        avatar: avatar,
         systemPrompt: p.role + '. ' + p.prompt
       });
       aiTokens.push(added.memberToken);
@@ -291,7 +357,7 @@
       roomName: 'AI 공용방',
       at: nowIso()
     };
-    Store.saveSession(session);
+    if (opts.open) Store.saveSession(session);
     return session;
   }
 
@@ -677,14 +743,157 @@
 
   /* ══════════════════════════════════ 참여 흐름 ══════════════════════════════════ */
 
+  /* ══════════════════════════════════ 본인 AI 고르기 ══════════════════════════════════ */
+
+  function renderAiPickRow() {
+    var row = $('aiPickRow');
+    if (!row) return;
+    clear(row);
+    AI_PRESETS.forEach(function (preset) {
+      var on = state.loginPreset === preset.id;
+      var btn = el('button', 'ai-chip' + (on ? ' is-on' : ''));
+      btn.type = 'button';
+      btn.id = 'ai-chip-' + preset.id;
+      btn.setAttribute('data-preset', preset.id);
+      btn.setAttribute('role', 'radio');
+      btn.setAttribute('aria-checked', on ? 'true' : 'false');
+      var img = el('img');
+      img.src = preset.avatar;
+      img.alt = '';
+      img.width = 30;
+      img.height = 30;
+      btn.appendChild(img);
+      btn.appendChild(el('span', null, preset.name));
+      btn.addEventListener('click', function () {
+        choosePreset(preset.id);
+      });
+      row.appendChild(btn);
+    });
+
+    var custom = el('button', 'ai-chip ai-chip--custom' + (state.loginPreset === null ? ' is-on' : ''));
+    custom.type = 'button';
+    custom.id = 'ai-chip-custom';
+    custom.setAttribute('role', 'radio');
+    custom.setAttribute('aria-checked', state.loginPreset === null ? 'true' : 'false');
+    custom.appendChild(el('span', 'ai-chip-initial', '+'));
+    custom.appendChild(el('span', null, '직접 입력'));
+    custom.addEventListener('click', function () {
+      choosePreset(null);
+    });
+    row.appendChild(custom);
+  }
+
+  function choosePreset(id) {
+    state.loginPreset = id;
+    renderAiPickRow();
+    show($('customNameBox'), id === null);
+    if (id === null) {
+      setTimeout(function () {
+        $('joinNameInput').focus();
+      }, 60);
+    }
+  }
+
+  /** 지금 화면에서 말하는 '내 이름' */
+  function currentLoginName() {
+    if (state.loginPreset) {
+      var p = presetById(state.loginPreset);
+      return p ? p.name : '';
+    }
+    return safeText($('joinNameInput').value, 24).trim();
+  }
+
+  /* ══════════════════════════════════ 방 로그인 (루트 주소) ══════════════════════════════════ */
+
+  async function startRoomLogin() {
+    state.loginMode = 'room';
+    state.loginPreset = null;
+    state.roomPassword = '';
+    state.joinToken = null;
+    state.inviteFull = false;
+    state.loginRoom = null;
+    showScreen('join');
+    show($('step-profile'), false);
+    show($('step-pass'), false);
+    show($('inviteLabelRow'), false);
+    show($('inviteExpiryRow'), false);
+    show($('loginHint'), false);
+    show($('passError'), false);
+    $('joinTitle').textContent = 'AI 공용방 입장';
+    $('joinSub').textContent = '본인 AI를 고르고 방 비밀번호를 입력해 주세요.';
+    $('passLabel').textContent = '방 비밀번호';
+    $('inviteRoom').textContent = '—';
+    $('inviteUses').textContent = '—';
+    $('joinNameInput').value = '';
+    renderAiPickRow();
+    show($('customNameBox'), true);
+
+    var info = null;
+    try {
+      info = await state.store.defaultRoom();
+    } catch (e) {
+      info = null;
+    }
+
+    if (!info && state.mode === 'demo' && !localStorage.getItem('squad.demo.clean')) {
+      // 로컬 데모: 방이 하나도 없을 때만 예시 방을 한 번 만든다
+      try {
+        await seedDemoRoom({ open: false });
+        info = await state.store.defaultRoom();
+      } catch (e) {
+        info = null;
+      }
+    }
+
+    if (!info) {
+      // 아직 방이 하나도 없을 때만 '방 만들기' 화면
+      showScreen('home');
+      return;
+    }
+
+    state.loginRoom = info;
+    $('inviteRoom').textContent = safeText(info.name || 'AI 공용방', 40);
+    $('inviteUses').textContent = (info.member_count || 0) + '명';
+
+    if (!info.has_password) {
+      $('joinSub').textContent =
+        '이 방에는 아직 방 비밀번호가 없어요. 방장이 [방 관리 → 방 비밀번호]에서 정하면, 초대 링크 없이도 이 주소에서 바로 들어올 수 있어요.';
+      show($('loginHint'), true);
+      $('loginHint').textContent = '지금은 초대 링크로 들어와 주세요.';
+      return;
+    }
+
+    show($('step-pass'), true);
+    if (state.mode === 'demo') {
+      show($('loginHint'), true);
+      $('loginHint').textContent = '데모 방 비밀번호: ' + DEMO_ROOM_PASS + ' (로컬 데모 전용)';
+    }
+    $('passcode').value = '';
+    setTimeout(function () {
+      $('passcode').focus();
+    }, 120);
+  }
+
   async function startJoin(token) {
     state.joinToken = token;
     state.joinPasscode = '';
     state.pendingAvatar = null;
     state.accent = 'blue';
+    state.loginMode = 'invite';
+    state.loginPreset = null;
+    state.loginRoom = null;
+    state.roomPassword = '';
     showScreen('join');
     show($('step-pass'), false);
     show($('step-profile'), false);
+    show($('inviteLabelRow'), true);
+    show($('inviteExpiryRow'), true);
+    show($('loginHint'), false);
+    show($('passError'), false);
+    $('passLabel').textContent = '입장 암호';
+    $('joinNameInput').value = '';
+    renderAiPickRow();
+    show($('customNameBox'), true);
     $('joinTitle').textContent = '초대 링크로 입장';
     $('joinSub').textContent = '초대 정보를 확인하는 중…';
 
@@ -704,12 +913,19 @@
     $('inviteRoom').textContent = safeText(info.room_name || 'AI 공용방', 40);
     $('inviteLabel').textContent = info.label ? safeText(info.label, 40) : '초대';
     $('inviteExpiry').textContent = fmtUntil(info.expires_at);
-    $('inviteUses').textContent = (info.uses || 0) + ' / ' + (info.max_uses || 1) + '명';
-    $('joinSub').textContent = '입장 암호를 입력해 주세요.';
+    $('inviteUses').textContent = fmtUses(info.uses, info.max_uses);
+
+    var unlimited = isUnlimitedUses(info.max_uses);
+    var full = info.full === true || (!unlimited && Number(info.uses || 0) >= Number(info.max_uses));
+    state.inviteFull = full;
+    $('joinSub').textContent = full
+      ? '입장 암호를 입력해 주세요. 정원이 찬 초대라 이미 방에 있는 이름으로만 들어갈 수 있어요.'
+      : '입장 암호를 입력해 주세요.';
 
     if (info.revoked) return showJoinError('이 초대는 폐기됐어요. 방장에게 새 링크를 받아 주세요.');
     if (info.expires_at && Date.parse(info.expires_at) < Date.now()) return showJoinError('초대 링크가 만료됐어요.');
-    if (Number(info.uses) >= Number(info.max_uses)) return showJoinError('이미 정원이 찬 초대예요.');
+    // 정원이 찼어도 막지 않는다: 같은 이름으로 다시 들어오는 사람이 있을 수 있다(재입장).
+    // 예전 서버는 squad_check_pass 가 used_up 을 돌려주므로 그때는 암호 단계에서 바로 막힌다.
 
     var lockedUntil = info.locked_until ? Date.parse(info.locked_until) : 0;
     if (lockedUntil > Date.now()) return showLocked(lockedUntil);
@@ -744,6 +960,14 @@
       show(err, true);
       return;
     }
+
+    // 루트 주소 로그인: 방 비밀번호
+    if (state.loginMode === 'room') {
+      await submitRoomPassword(passcode);
+      return;
+    }
+
+    // 초대 링크: 입장 암호
     $('btn-pass').disabled = true;
     var res = null;
     try {
@@ -755,10 +979,65 @@
 
     if (res && res.ok) {
       state.joinPasscode = passcode;
+      if (res.full) state.inviteFull = true;
       show($('step-pass'), false);
+      // 본인 AI를 골랐으면 프로필 화면 없이 바로 입장/재입장
+      if (state.loginPreset) {
+        await presetJoin(err);
+        return;
+      }
       showJoinProfile();
       return;
     }
+    showPasscodeError(res, err);
+  }
+
+  async function submitRoomPassword(passcode) {
+    var err = $('passError');
+    var name = currentLoginName();
+    if (!name) {
+      err.textContent = '본인 AI를 고르거나 이름을 입력해 주세요.';
+      show(err, true);
+      return;
+    }
+    $('btn-pass').disabled = true;
+    var chk = null;
+    try {
+      chk = await state.store.checkRoomPassword(state.loginRoom.id, passcode);
+    } catch (e) {
+      chk = { ok: false, error: 'request_failed' };
+    }
+    $('btn-pass').disabled = false;
+    if (!chk || !chk.ok) {
+      showPasscodeError(chk, err);
+      return;
+    }
+
+    state.roomPassword = passcode;
+    state.joinPasscode = passcode;
+
+    if (state.loginPreset) {
+      await presetJoin(err);
+      return;
+    }
+    if (Store.isHostAlias(name)) {
+      // taewoo / 태우 → 방장으로 바로 로그인
+      await doJoin({
+        name: name,
+        isAi: false,
+        accent: 'blue',
+        avatar: null,
+        systemPrompt: null,
+        errNode: err,
+        btn: $('btn-pass')
+      });
+      return;
+    }
+    show($('step-pass'), false);
+    showJoinProfile();
+  }
+
+  function showPasscodeError(res, err) {
     if (res && res.error === 'locked') {
       showLocked(Date.parse(res.locked_until));
       return;
@@ -772,14 +1051,122 @@
     if (res && res.error === 'expired') return showJoinError('초대 링크가 만료됐어요.');
     if (res && res.error === 'revoked') return showJoinError('이 초대는 폐기됐어요.');
     if (res && res.error === 'used_up') return showJoinError('이미 정원이 찬 초대예요.');
+    if (res && res.error === 'room_password_missing') {
+      return showJoinError('이 방에는 아직 방 비밀번호가 없어요. 방장이 정해야 들어올 수 있어요.');
+    }
+    if (res && res.error === 'room_not_found') return showJoinError('방을 찾을 수 없어요.');
+    if (res && res.error === 'room_password_mismatch') return showJoinError('방 비밀번호가 맞지 않아요.');
+    if (res && res.error === 'host_not_found') return showJoinError('이 방에 방장이 없어요.');
+    if (res && res.error === 'server_needs_update') {
+      return showJoinError('실시간 서버가 예전 버전이에요. 방장이 supabase/schema.sql 을 한 번 더 실행해야 해요.');
+    }
     err.textContent = '확인하지 못했어요. 잠시 뒤 다시 시도해 주세요.';
     show(err, true);
   }
 
+  /** 본인 AI(프리셋)로 바로 입장/재입장 */
+  async function presetJoin(errNode) {
+    var preset = presetById(state.loginPreset);
+    if (!preset) return false;
+    var btn = $('btn-pass');
+    btn.disabled = true;
+    var avatar = await presetAvatarDataUrl(preset.avatar);
+    btn.disabled = false;
+    return doJoin({
+      name: preset.name,
+      isAi: true,
+      accent: preset.accent,
+      avatar: avatar,
+      systemPrompt: presetPrompt(preset),
+      errNode: errNode || $('passError'),
+      btn: btn
+    });
+  }
+
+  var JOIN_ERRORS = {
+    bad_passcode: '암호가 맞지 않아요.',
+    locked: '시도 횟수를 넘겨 잠시 잠겼어요.',
+    used_up: '정원이 찬 초대예요. 방장에게 새 링크를 받아 주세요.',
+    expired: '초대가 만료됐어요.',
+    revoked: '폐기된 초대예요.',
+    invite_key_mismatch: '초대 링크가 올바르지 않아요.',
+    room_password_missing: '이 방에는 아직 방 비밀번호가 없어요.',
+    room_password_mismatch: '방 비밀번호가 맞지 않아요.',
+    room_not_found: '방을 찾을 수 없어요.',
+    host_not_found: '이 방에 방장이 없어요.',
+    server_needs_update: '실시간 서버가 예전 버전이에요. 방장이 schema.sql 을 다시 실행해야 해요.'
+  };
+
+  /** 초대 링크·방 로그인 공통 입장 처리 */
+  async function doJoin(opts) {
+    var err = opts.errNode || $('profileError');
+    show(err, false);
+    if (opts.btn) opts.btn.disabled = true;
+    var res = null;
+    try {
+      if (state.loginMode === 'room') {
+        res = await state.store.roomLogin({
+          roomId: state.loginRoom.id,
+          password: state.roomPassword,
+          name: opts.name,
+          kind: opts.isAi ? 'ai' : 'guest',
+          accent: opts.accent,
+          avatar: opts.avatar,
+          systemPrompt: opts.systemPrompt
+        });
+      } else {
+        res = await state.store.joinInvite({
+          token: state.joinToken,
+          passcode: state.joinPasscode,
+          name: opts.name,
+          kind: opts.isAi ? 'ai' : 'guest',
+          accent: opts.accent,
+          avatar: opts.avatar,
+          systemPrompt: opts.systemPrompt
+        });
+      }
+    } catch (e) {
+      res = { ok: false, error: (e && e.message) || 'join_failed' };
+    }
+    if (opts.btn) opts.btn.disabled = false;
+
+    if (!res || !res.ok) {
+      err.textContent = mappedError(JOIN_ERRORS, res && res.error);
+      show(err, true);
+      return false;
+    }
+
+    var session = {
+      roomId: res.room_id,
+      memberId: res.member_id,
+      memberToken: res.member_token,
+      roomKey: res.room_key,
+      kind: res.is_host ? 'host' : res.kind || (opts.isAi ? 'ai' : 'guest'),
+      name: res.name || opts.name,
+      roomName: res.room_name || 'AI 공용방',
+      at: nowIso()
+    };
+    Store.saveSession(session);
+    if (session.kind === 'ai') Store.saveAiToken(res.room_id, res.member_id, res.member_token);
+    if (window.history && history.replaceState) {
+      history.replaceState(null, '', location.pathname);
+    }
+    // 들어간 뒤에는 새 초대 링크로 다시 열리지 않게 주소를 정리한다
+    show($('step-profile'), false);
+    show($('step-pass'), false);
+    if (res.rejoined) toast('이미 있던 이름이에요. 기존 멤버로 다시 들어왔어요.');
+    openRoom(session);
+    return true;
+  }
+
   function showJoinProfile() {
     show($('step-profile'), true);
-    $('joinSub').textContent = '프로필을 정하고 들어가 주세요.';
-    $('profileName').value = '';
+    $('joinSub').textContent = state.inviteFull
+      ? '프로필을 정하고 들어가 주세요. 정원이 찬 초대라 이미 있는 이름으로만 들어갈 수 있어요.'
+      : '프로필을 정하고 들어가 주세요.';
+    show($('rejoinNote'), true);
+    show($('legacyNote'), state.mode === 'live' && !supportsRejoin());
+    $('profileName').value = currentLoginName();
     $('profilePrompt').value = '';
     $('profileRole').value = '';
     $('toggleAi').checked = false;
@@ -824,24 +1211,29 @@
     }
   }
 
+  function cropToDataUrl(img, size) {
+    var canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, size, size);
+    var scale = Math.max(size / img.width, size / img.height);
+    var w = img.width * scale;
+    var h = img.height * scale;
+    ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+    var out = canvas.toDataURL('image/webp', 0.82);
+    if (out.indexOf('data:image/webp') !== 0) out = canvas.toDataURL('image/jpeg', 0.85);
+    return out;
+  }
+
   function resizeImage(file, size) {
     return new Promise(function (resolve, reject) {
       var url = URL.createObjectURL(file);
       var img = new Image();
       img.onload = function () {
         try {
-          var canvas = document.createElement('canvas');
-          canvas.width = size;
-          canvas.height = size;
-          var ctx = canvas.getContext('2d');
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, size, size);
-          var scale = Math.max(size / img.width, size / img.height);
-          var w = img.width * scale;
-          var h = img.height * scale;
-          ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
-          var out = canvas.toDataURL('image/webp', 0.82);
-          if (out.indexOf('data:image/webp') !== 0) out = canvas.toDataURL('image/jpeg', 0.85);
+          var out = cropToDataUrl(img, size);
           URL.revokeObjectURL(url);
           resolve(out);
         } catch (err) {
@@ -854,6 +1246,30 @@
         reject(new Error('image_load_failed'));
       };
       img.src = url;
+    });
+  }
+
+  /* 프리셋 아이콘을 160px data URL 로 바꿔 둔다 (DB 에는 지금처럼 data URL 만 저장)
+   * 서버 스키마를 바꾸지 않아도 되고, 예전 서버에서도 그대로 동작한다. */
+  var presetAvatarCache = {};
+
+  function presetAvatarDataUrl(src) {
+    if (presetAvatarCache[src]) return Promise.resolve(presetAvatarCache[src]);
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var out = cropToDataUrl(img, AVATAR_SIZE);
+          presetAvatarCache[src] = out;
+          resolve(out);
+        } catch (e) {
+          resolve(null);
+        }
+      };
+      img.onerror = function () {
+        resolve(null);
+      };
+      img.src = src;
     });
   }
 
@@ -872,55 +1288,15 @@
     var prompt = safeText($('profilePrompt').value, 600).trim();
     var systemPrompt = [role ? '역할: ' + role : '', prompt].filter(Boolean).join('\n') || null;
 
-    $('btn-enter').disabled = true;
-    var res = null;
-    try {
-      res = await state.store.joinInvite({
-        token: state.joinToken,
-        passcode: state.joinPasscode,
-        name: name,
-        kind: isAi ? 'ai' : 'guest',
-        accent: state.accent,
-        avatar: state.pendingAvatar,
-        systemPrompt: systemPrompt
-      });
-    } catch (e) {
-      res = { ok: false, error: 'join_failed' };
-    }
-    $('btn-enter').disabled = false;
-
-    if (!res || !res.ok) {
-      var map = {
-        bad_passcode: '암호가 맞지 않아요.',
-        locked: '시도 횟수를 넘겨 잠시 잠겼어요.',
-        used_up: '정원이 찬 초대예요.',
-        expired: '초대가 만료됐어요.',
-        revoked: '폐기된 초대예요.',
-        invite_key_mismatch: '초대 링크가 올바르지 않아요.'
-      };
-      err.textContent = mappedError(map, res && res.error);
-      show(err, true);
-      return;
-    }
-
-    var session = {
-      roomId: res.room_id,
-      memberId: res.member_id,
-      memberToken: res.member_token,
-      roomKey: res.room_key,
-      kind: isAi ? 'ai' : 'guest',
+    await doJoin({
       name: name,
-      roomName: res.room_name || 'AI 공용방',
-      at: nowIso()
-    };
-    Store.saveSession(session);
-    if (isAi) Store.saveAiToken(res.room_id, res.member_id, res.member_token);
-    if (window.history && history.replaceState) {
-      history.replaceState(null, '', location.pathname);
-    }
-    // 들어간 뒤에는 새 초대 링크로 다시 열리지 않게 주소를 정리한다
-    show($('step-profile'), false);
-    openRoom(session);
+      isAi: isAi,
+      accent: state.accent,
+      avatar: state.pendingAvatar,
+      systemPrompt: systemPrompt,
+      errNode: err,
+      btn: $('btn-enter')
+    });
   }
 
   function mappedError(map, code) {
@@ -938,7 +1314,11 @@
     $('inviteName').value = '';
     $('invitePass').value = suggestPasscode();
     $('inviteExpiryInput').value = '1440';
+    var unlimitedOk = supportsUnlimited();
+    var unlimitedOpt = $('inviteUsesInput').querySelector('option[value="0"]');
+    if (unlimitedOpt) unlimitedOpt.disabled = !unlimitedOk;
     $('inviteUsesInput').value = '1';
+    show($('inviteLegacyNote'), !unlimitedOk);
     show($('inviteDemoNote'), state.mode === 'demo');
     openSheet('invite');
     refreshInviteList();
@@ -962,7 +1342,8 @@
       return;
     }
     var minutes = Number($('inviteExpiryInput').value) || 0;
-    var uses = Number($('inviteUsesInput').value) || 1;
+    var rawUses = $('inviteUsesInput').value;
+    var uses = rawUses === '0' ? null : Number(rawUses) || 1; // '0' = 무제한
     $('btn-create-invite').disabled = true;
     try {
       var res = await state.store.createInvite({
@@ -978,11 +1359,15 @@
       $('inviteLinkText').textContent = link;
       $('inviteResult').setAttribute('data-link', link);
       $('inviteResult').setAttribute('data-pass', passcode);
+      $('inviteResult').setAttribute('data-uses', isUnlimitedUses(res.max_uses) ? '무제한' : String(res.max_uses));
       show($('form-invite'), false);
       show($('inviteResult'), true);
       refreshInviteList();
     } catch (e) {
-      err.textContent = '초대 링크를 만들지 못했어요. ' + (e && e.message ? e.message : '');
+      var code = e && e.message ? e.message : '';
+      err.textContent = code === 'server_needs_update'
+        ? '실시간 서버가 예전 버전이라 무제한 초대는 만들 수 없어요. 방장이 supabase/schema.sql 을 한 번 다시 실행해 주세요.'
+        : '초대 링크를 만들지 못했어요. ' + code;
       show(err, true);
     } finally {
       $('btn-create-invite').disabled = false;
@@ -1036,12 +1421,14 @@
       var li = el('li', 'invite-item');
       var main = el('div', 'item-main');
       var title = el('div', 'item-title', inv.label || '초대');
-      var sub = el('div', 'item-sub', (inv.uses || 0) + '/' + (inv.max_uses || 1) + '명 사용 · ' + fmtUntil(inv.expires_at));
+      var unlimited = isUnlimitedUses(inv.max_uses);
+      var sub = el('div', 'item-sub', fmtUses(inv.uses, inv.max_uses) + ' · ' + fmtUntil(inv.expires_at));
       main.appendChild(title);
       main.appendChild(sub);
       li.appendChild(main);
 
-      var dead = inv.revoked || (inv.expires_at && Date.parse(inv.expires_at) < Date.now()) || inv.uses >= inv.max_uses;
+      var full = !unlimited && Number(inv.uses || 0) >= Number(inv.max_uses);
+      var dead = inv.revoked || (inv.expires_at && Date.parse(inv.expires_at) < Date.now()) || full;
       var badge = el('span', 'badge' + (dead ? ' dead' : ''), dead ? (inv.revoked ? '폐기' : '종료') : '사용 가능');
       li.appendChild(badge);
 
@@ -1115,6 +1502,24 @@
     $('geminiKey').value = '';
     $('geminiKey').placeholder = Gemini.sessionKey() ? '저장된 키가 이 탭에 있어요' : 'AIza...';
     $('connHint').textContent = state.mode === 'demo' ? '로컬 데모' : 'Supabase 연결됨';
+    show($('roomPassError'), false);
+    $('roomPass').value = '';
+    $('roomPassState').textContent = '확인하는 중…';
+    show($('roomPassState'), true);
+    if (state.store && typeof state.store.publicRoomInfo === 'function') {
+      state.store
+        .publicRoomInfo(state.session.roomId)
+        .then(function (info) {
+          $('roomPassState').textContent = !info
+            ? '이 서버에서는 아직 방 비밀번호를 쓸 수 없어요. (schema.sql 재실행이 필요합니다)'
+            : info.has_password
+            ? '방 비밀번호가 설정되어 있어요. 바꾸려면 새 비밀번호를 넣고 저장하세요.'
+            : '아직 방 비밀번호가 없어요. 정하면 초대 링크 없이 루트 주소에서 바로 들어올 수 있어요.';
+        })
+        .catch(function () {
+          $('roomPassState').textContent = '';
+        });
+    }
     var cfg = Store.loadConfig();
     $('cfgUrl').value = cfg.supabaseUrl || '';
     $('cfgKey').value = '';
@@ -1138,6 +1543,8 @@
 
   function renderHome() {
     $('homeMode').textContent = state.mode === 'demo' ? '로컬 데모' : 'Supabase 실시간';
+    var legacyNote = $('homeLegacyNote');
+    if (legacyNote) show(legacyNote, state.mode === 'live' && !supportsRoomLogin());
     $('homeStorage').textContent = state.mode === 'demo' ? '이 브라우저 (localStorage)' : 'Supabase + 이 브라우저';
     var list = $('homeRooms');
     if (!list) return;
@@ -1383,6 +1790,40 @@
       }, 900);
     });
 
+    $('btn-save-room-pass').addEventListener('click', async function () {
+      var err = $('roomPassError');
+      show(err, false);
+      var pass = $('roomPass').value;
+      if (pass.length < 4) {
+        err.textContent = '방 비밀번호는 4자 이상으로 정해 주세요.';
+        show(err, true);
+        return;
+      }
+      if (!supportsRoomLogin()) {
+        err.textContent = '서버가 예전 버전이라 지금은 쓸 수 없어요. 방장이 supabase/schema.sql 을 다시 실행해 주세요.';
+        show(err, true);
+        return;
+      }
+      $('btn-save-room-pass').disabled = true;
+      try {
+        await state.store.setRoomPassword({
+          roomId: state.session.roomId,
+          hostToken: state.session.memberToken,
+          roomKey: state.session.roomKey,
+          passcode: pass
+        });
+        $('roomPass').value = '';
+        $('roomPassState').textContent = '방 비밀번호가 설정되어 있어요. 이제 루트 주소에서 이름 + 비밀번호로 들어올 수 있어요.';
+        show($('roomPassState'), true);
+        toast('방 비밀번호를 저장했어요');
+      } catch (e) {
+        err.textContent = '저장하지 못했어요. ' + ((e && e.message) || '');
+        show(err, true);
+      } finally {
+        $('btn-save-room-pass').disabled = false;
+      }
+    });
+
     $('btn-clear-cfg').addEventListener('click', function () {
       Store.saveConfig({ supabaseUrl: '', supabaseKey: '' });
       setTimeout(function () {
@@ -1444,7 +1885,13 @@
         /* noop */
       }
       var session = Store.currentSession();
-      if (!session) session = await seedDemoRoom();
+      if (!session) {
+        try {
+          session = await seedDemoRoom({ open: true });
+        } catch (e) {
+          session = null;
+        }
+      }
       if (session) openRoom(session);
     });
 
@@ -1588,6 +2035,10 @@
     openRoom: openRoom,
     openInviteSheet: openInviteSheet,
     openHostSheet: openHostSheet,
+    startRoomLogin: startRoomLogin,
+    startJoin: startJoin,
+    choosePreset: choosePreset,
+    AI_PRESETS: AI_PRESETS,
     boot: boot
   };
 })();

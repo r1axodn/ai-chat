@@ -66,26 +66,37 @@
         <span class="lock-badge" aria-hidden="true">
           <svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="3" /><path d="M8.4 10V7.6a3.6 3.6 0 0 1 7.2 0V10" /></svg>
         </span>
-        <h2 id="joinTitle">초대 링크로 입장</h2>
-        <p class="join-sub" id="joinSub">입장 암호를 입력해 주세요.</p>
+        <h2 id="joinTitle">방에 입장</h2>
+        <p class="join-sub" id="joinSub">본인 AI를 고르고 암호를 입력해 주세요.</p>
       </div>
 
       <div class="card invite-card" id="inviteCard">
         <div class="invite-row"><span>방</span><strong id="inviteRoom">—</strong></div>
-        <div class="invite-row"><span>초대</span><strong id="inviteLabel">—</strong></div>
-        <div class="invite-row"><span>만료</span><strong id="inviteExpiry">—</strong></div>
+        <div class="invite-row" id="inviteLabelRow"><span>초대</span><strong id="inviteLabel">—</strong></div>
+        <div class="invite-row" id="inviteExpiryRow"><span>만료</span><strong id="inviteExpiry">—</strong></div>
         <div class="invite-row"><span>인원</span><strong id="inviteUses">—</strong></div>
       </div>
 
-      <!-- 1단계: 암호 -->
+      <!-- 1단계: 본인 AI + 암호 -->
       <form class="join-step" id="step-pass" hidden>
+        <div class="field">
+          <span class="field-label">본인 AI <span class="muted">(고르면 프로필 화면 없이 바로 들어갑니다)</span></span>
+          <div class="ai-pick-row" id="aiPickRow" role="radiogroup" aria-label="본인 AI 선택"></div>
+        </div>
+
+        <label class="field" id="customNameBox" hidden>
+          <span class="field-label">이름</span>
+          <input id="joinNameInput" type="text" maxlength="24" placeholder="방에서 보일 이름 (방장은 taewoo)" autocomplete="off" />
+        </label>
+
         <label class="field">
-          <span class="field-label">입장 암호</span>
+          <span class="field-label" id="passLabel">입장 암호</span>
           <input id="passcode" type="password" inputmode="text" maxlength="64" placeholder="암호 입력" required />
         </label>
         <p class="form-error" id="passError" hidden></p>
         <button class="primary-btn" id="btn-pass" type="submit">입장하기</button>
         <p class="fine-print">암호는 최대 5회까지 시도할 수 있어요. 5회 틀리면 15분 동안 잠깁니다.</p>
+        <p class="fine-print" id="loginHint" hidden></p>
       </form>
 
       <!-- 2단계: 프로필 -->
@@ -131,6 +142,8 @@
         </div>
 
         <p class="form-error" id="profileError" hidden></p>
+        <p class="fine-print" id="rejoinNote">이미 방에 있는 이름을 쓰면 새 멤버를 만들지 않고 그 이름으로 다시 들어옵니다. (사진·색은 그대로, 새 사진을 올렸을 때만 바뀝니다)</p>
+        <p class="fine-print" id="legacyNote" hidden>실시간 서버가 예전 버전이라, 같은 이름으로 들어가면 멤버가 중복될 수 있어요. 방장에게 <code>supabase/schema.sql</code> 재실행을 부탁해 주세요.</p>
         <button class="primary-btn" id="btn-enter" type="submit">방에 입장</button>
       </form>
     </div>
@@ -170,6 +183,7 @@
       </form>
 
       <button class="ghost-btn" id="btn-demo-start" type="button">데모 방으로 둘러보기</button>
+      <p class="fine-print" id="homeLegacyNote" hidden>실시간 서버가 예전 버전이라 루트 주소 로그인을 쓸 수 없어요. 초대 링크로 들어오시고, 루트 로그인을 쓰려면 방장이 <code>supabase/schema.sql</code> 을 한 번 다시 실행한 뒤 [방 관리 → 방 비밀번호]를 정해 주세요.</p>
     </div>
   </section>
 </div>
@@ -216,9 +230,11 @@
               <option value="3">3명</option>
               <option value="5">5명</option>
               <option value="10">10명</option>
+              <option value="0">무제한</option>
             </select>
           </label>
         </div>
+        <p class="fine-print" id="inviteLegacyNote" hidden>실시간 서버가 예전 버전이에요. '무제한'과 같은 이름 재입장은 방장이 <code>supabase/schema.sql</code> 을 한 번 다시 실행한 뒤에 쓸 수 있어요.</p>
         <p class="form-error" id="inviteError" hidden></p>
         <button class="primary-btn" type="submit" id="btn-create-invite">초대 링크 만들기</button>
       </form>
@@ -324,6 +340,20 @@
           <button class="mini-btn subtle" type="button" id="btn-clear-cfg">비우기</button>
         </div>
         <p class="form-error" id="cfgError" hidden></p>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h3>방 비밀번호</h3><span class="section-hint">초대 링크 없이 입장</span></div>
+        <label class="field">
+          <span class="field-label">새 방 비밀번호</span>
+          <input id="roomPass" type="password" maxlength="64" placeholder="6자 이상" autocomplete="off" />
+        </label>
+        <p class="fine-print">이 비밀번호를 아는 사람은 초대 링크 없이 루트 주소에서 자기 이름으로 들어올 수 있어요. 이름에 <strong>taewoo</strong> 를 쓰면 방장으로 로그인됩니다. 방 열쇠를 이 비밀번호로 감싸 두기 때문에, 비밀번호를 잊으면 루트 로그인은 할 수 없습니다(초대 링크는 그대로 동작).</p>
+        <div class="result-actions">
+          <button class="mini-btn" type="button" id="btn-save-room-pass">저장</button>
+        </div>
+        <p class="form-error" id="roomPassError" hidden></p>
+        <p class="fine-print" id="roomPassState"></p>
       </div>
 
       <div class="section">

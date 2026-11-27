@@ -22,9 +22,50 @@
   var PASSCODE_FAIL_LIMIT = 5;
   var PASSCODE_LOCK_MS = 15 * 60 * 1000;
   var MAX_DEMO_MESSAGES = 5000;
+  var MAX_USES_CAP = 1000;
 
   function nowIso() {
     return new Date().toISOString();
+  }
+
+  /* ---------------------------------------------------------------- 사용 인원
+   *  max_uses === null  → 무제한 (schema.sql 의 max_uses null 과 같은 뜻)
+   *  숫자                → 그 횟수만큼
+   *  0·음수·''           → 무제한으로 본다 (예전 화면에서 0 을 넘겨도 안전하게)
+   */
+
+  function isUnlimitedUses(value) {
+    if (value == null || value === '') return true;
+    var n = Number(value);
+    return !isFinite(n) || n <= 0;
+  }
+
+  /** 초대를 만들 때 쓰는 정규화: 넘기지 않으면 1명, null(또는 0)이면 무제한. */
+  function normalizeMaxUses(value) {
+    if (value === null) return null;
+    if (value === undefined || value === '') return 1;
+    var n = Math.floor(Number(value));
+    if (!isFinite(n) || n <= 0) return null;
+    return Math.max(1, Math.min(MAX_USES_CAP, n));
+  }
+
+  /** 같은 이름인지 (앞뒤 공백 무시, 대소문자 무시) */
+  function sameName(a, b) {
+    return (
+      String(a == null ? '' : a).trim().toLowerCase() ===
+      String(b == null ? '' : b).trim().toLowerCase()
+    );
+  }
+
+  /** 방장으로 로그인하는 이름 (대소문자 무시) */
+  var HOST_ALIASES = ['taewoo', '태우'];
+  function isHostAlias(name) {
+    return HOST_ALIASES.indexOf(String(name == null ? '' : name).trim().toLowerCase()) >= 0;
+  }
+
+  function isFullInvite(uses, maxUses) {
+    if (isUnlimitedUses(maxUses)) return false;
+    return Number(uses || 0) >= Number(maxUses);
   }
 
   function uid(prefix) {
@@ -218,7 +259,21 @@
   function DemoStore() {
     this.mode = 'demo';
     this.label = '로컬 데모';
+    this.caps = { version: 2, unlimited: true, rejoin: true };
   }
+
+  /* 데모 저장소는 항상 이 버전의 규칙을 그대로 쓴다. */
+  DemoStore.prototype.supportsUnlimited = function () {
+    return true;
+  };
+
+  DemoStore.prototype.supportsRejoin = function () {
+    return true;
+  };
+
+  DemoStore.prototype.supportsRoomLogin = function () {
+    return true;
+  };
 
   DemoStore.prototype.init = function () {
     var self = this;
@@ -393,14 +448,15 @@
       if (!invite) return { ok: false, error: 'invalid_invite' };
       if (invite.revoked) return { ok: false, error: 'revoked' };
       if (invite.expires_at && Date.parse(invite.expires_at) < Date.now()) return { ok: false, error: 'expired' };
-      if (invite.uses >= invite.max_uses) return { ok: false, error: 'used_up' };
+      // 정원이 찼더라도 막지 않는다 — 같은 이름으로 다시 들어오는 사람이 있을 수 있다.
+      // (새 이름인지 판단은 이름을 받는 joinInvite 에서 한다)
       var lockedUntil = invite.locked_until ? Date.parse(invite.locked_until) : 0;
       if (lockedUntil > Date.now()) return { ok: false, error: 'locked', locked_until: invite.locked_until };
       return C.passcodeHash(passcode, invite.pass_salt).then(function (passHash) {
         if (passHash === invite.pass_hash) {
           invite.fail_count = 0;
           writeDemo(db);
-          return { ok: true };
+          return { ok: true, full: isFullInvite(invite.uses, invite.max_uses) };
         }
         invite.fail_count = (invite.fail_count || 0) + 1;
         if (invite.fail_count >= PASSCODE_FAIL_LIMIT) {
@@ -468,7 +524,7 @@
         wrapped_key: invite.wrappedKey,
         pass_salt: invite.passSalt,
         pass_hash: invite.passHash,
-        max_uses: Math.max(1, Math.min(20, Number(opts.maxUses) || 1)),
+        max_uses: normalizeMaxUses(opts.maxUses),
         uses: 0,
         expires_at: expiresAt,
         revoked: false,
@@ -551,21 +607,38 @@
         room_name: room.name,
         label: inv.label,
         member_count: count,
-        uses: inv.uses,
+        uses: inv.uses || 0,
         max_uses: inv.max_uses,
+        unlimited: isUnlimitedUses(inv.max_uses),
+        full: isFullInvite(inv.uses, inv.max_uses),
         expires_at: inv.expires_at,
         revoked: inv.revoked,
         locked_until: inv.locked_until,
-        fail_count: inv.fail_count
+        fail_count: inv.fail_count,
+        pass_salt: inv.pass_salt
       };
     });
   };
+
+  /** 같은 이름(방장 제외)의 기존 멤버를 찾는다. 없으면 null. */
+  function findMemberByName(db, roomId, name) {
+    var found = null;
+    Object.keys(db.members).forEach(function (id) {
+      var m = db.members[id];
+      if (m.room_id !== roomId) return;
+      if (m.kind === 'host') return; // 방장 자리는 이름으로 빼앗을 수 없다
+      if (!sameName(m.name, name)) return;
+      if (!found || String(m.created_at || '') < String(found.created_at || '')) found = m;
+    });
+    return found;
+  }
 
   DemoStore.prototype.joinInvite = function (opts) {
     var parsed = C.parseInviteToken(opts.token);
     if (!parsed) return Promise.resolve({ ok: false, error: 'invalid_invite' });
     var db = readDemo();
     var tokenHash = opts.tokenHash;
+    var name = String(opts.name || '').slice(0, 24).trim();
     return C.sha256Hex(parsed.tokenId).then(function (hash) {
       var invite = null;
       Object.keys(db.invites).forEach(function (id) {
@@ -576,7 +649,6 @@
       if (invite.expires_at && Date.parse(invite.expires_at) < Date.now()) {
         return { ok: false, error: 'expired' };
       }
-      if (invite.uses >= invite.max_uses) return { ok: false, error: 'used_up' };
       var lockedUntil = invite.locked_until ? Date.parse(invite.locked_until) : 0;
       if (lockedUntil > Date.now()) {
         return { ok: false, error: 'locked', locked_until: invite.locked_until };
@@ -594,23 +666,45 @@
           writeDemo(db);
           return { ok: false, error: 'bad_passcode', remaining: remaining };
         }
+
+        var existing = findMemberByName(db, invite.room_id, name);
+        // 정원이 찬 초대라도 이미 있는 이름이면 다시 들어올 수 있다
+        if (!existing && isFullInvite(invite.uses, invite.max_uses)) {
+          return { ok: false, error: 'used_up' };
+        }
+
         invite.fail_count = 0;
         invite.locked_until = null;
-        invite.uses = (invite.uses || 0) + 1;
         var memberToken = C.randomToken(32);
-        var memberId = uid('mem');
+        var newAvatar = opts.avatar || null;
+        var systemPrompt = opts.systemPrompt || null;
+        var rejoined = !!existing;
+        var memberId = existing ? existing.id : uid('mem');
+        if (!existing) invite.uses = (invite.uses || 0) + 1; // 재입장은 사용 횟수를 늘리지 않는다
+
         return C.sha256Hex(memberToken).then(function (memberHash) {
-          db.members[memberId] = {
-            id: memberId,
-            room_id: invite.room_id,
-            name: String(opts.name || '').slice(0, 24) || '게스트',
-            kind: opts.kind === 'ai' ? 'ai' : 'guest',
-            accent: opts.accent || 'blue',
-            avatar: opts.avatar || null,
-            system_prompt: opts.systemPrompt || null,
-            member_token_hash: memberHash,
-            created_at: nowIso()
-          };
+          if (existing) {
+            // 기존 신분을 그대로 이어받는다. 새 사진이 없으면 사진·색을 유지하고, 새 사진이 있으면 갱신한다.
+            existing.name = name || existing.name;
+            existing.avatar = newAvatar || existing.avatar || null;
+            if (newAvatar) existing.accent = opts.accent || existing.accent || 'blue';
+            existing.system_prompt = systemPrompt || existing.system_prompt || null;
+            existing.member_token_hash = memberHash;
+            existing.last_seen = nowIso();
+          } else {
+            db.members[memberId] = {
+              id: memberId,
+              room_id: invite.room_id,
+              name: name || '게스트',
+              kind: opts.kind === 'ai' ? 'ai' : 'guest',
+              accent: opts.accent || 'blue',
+              avatar: newAvatar,
+              system_prompt: systemPrompt,
+              member_token_hash: memberHash,
+              created_at: nowIso(),
+              last_seen: nowIso()
+            };
+          }
           writeDemo(db);
           return C.unwrapRoomKey(invite.wrapped_key, parsed.wrapKeyB64).then(function (roomKey) {
             return {
@@ -619,9 +713,183 @@
               room_name: db.rooms[invite.room_id].name,
               member_id: memberId,
               member_token: memberToken,
-              room_key: roomKey
+              room_key: roomKey,
+              rejoined: rejoined,
+              name: db.members[memberId].name,
+              kind: db.members[memberId].kind
             };
           });
+        });
+      });
+    });
+  };
+
+  /* ---------------------------------------------------------------- 방 단위 로그인 (루트 주소)
+   *  초대 링크 없이 '방 비밀번호'만으로 들어오는 길. 데모도 실시간과 같은 규칙을 쓴다.
+   */
+
+  function roomPublicInfo(db, room) {
+    if (!room) return null;
+    var count = Object.keys(db.members).filter(function (id) {
+      return db.members[id].room_id === room.id;
+    }).length;
+    return {
+      id: room.id,
+      name: room.name,
+      member_count: count,
+      has_password: !!(room.pass_hash && room.wrapped_key),
+      pass_salt: room.pass_salt || null,
+      locked_until: room.locked_until || null,
+      created_at: room.created_at,
+      last_active: room.last_active || room.created_at
+    };
+  }
+
+  DemoStore.prototype.defaultRoom = function () {
+    var db = readDemo();
+    var rooms = Object.keys(db.rooms).map(function (id) {
+      return db.rooms[id];
+    });
+    if (!rooms.length) return Promise.resolve(null);
+    rooms.sort(function (a, b) {
+      return String(b.last_active || b.created_at).localeCompare(String(a.last_active || a.created_at));
+    });
+    return Promise.resolve(roomPublicInfo(db, rooms[0]));
+  };
+
+  DemoStore.prototype.publicRoomInfo = function (roomId) {
+    var db = readDemo();
+    return Promise.resolve(roomPublicInfo(db, db.rooms[roomId]));
+  };
+
+  DemoStore.prototype.setRoomPassword = function (opts) {
+    var db = readDemo();
+    var room = db.rooms[opts.roomId];
+    if (!room) return Promise.reject(new Error('room_not_found'));
+    var passcode = String(opts.passcode || '');
+    if (passcode.length < 4) return Promise.reject(new Error('passcode_too_short'));
+    return C.sha256Hex(opts.hostToken || '').then(function (hash) {
+      if (hash !== room.host_token_hash) throw new Error('not_host');
+      return C.wrapRoomKeyWithPassword(opts.roomKey, passcode);
+    }).then(function (w) {
+      room.pass_salt = w.passSalt;
+      room.pass_hash = w.passHash;
+      room.wrapped_key = w.wrappedKey;
+      room.fail_count = 0;
+      room.locked_until = null;
+      room.has_password = true;
+      writeDemo(db);
+      return { ok: true };
+    });
+  };
+
+  DemoStore.prototype.checkRoomPassword = function (roomId, password) {
+    var db = readDemo();
+    var room = db.rooms[roomId];
+    if (!room) return Promise.resolve({ ok: false, error: 'room_not_found' });
+    if (!room.pass_hash || !room.wrapped_key) return Promise.resolve({ ok: false, error: 'room_password_missing' });
+    var lockedUntil = room.locked_until ? Date.parse(room.locked_until) : 0;
+    if (lockedUntil > Date.now()) {
+      return Promise.resolve({ ok: false, error: 'locked', locked_until: room.locked_until });
+    }
+    return C.passcodeHash(String(password || ''), room.pass_salt).then(function (hash) {
+      if (hash === room.pass_hash) {
+        room.fail_count = 0;
+        writeDemo(db);
+        return { ok: true };
+      }
+      room.fail_count = (room.fail_count || 0) + 1;
+      var remaining = PASSCODE_FAIL_LIMIT - room.fail_count;
+      if (remaining <= 0) {
+        room.fail_count = 0;
+        room.locked_until = new Date(Date.now() + PASSCODE_LOCK_MS).toISOString();
+        writeDemo(db);
+        return { ok: false, error: 'locked', locked_until: room.locked_until };
+      }
+      writeDemo(db);
+      return { ok: false, error: 'bad_passcode', remaining: remaining };
+    });
+  };
+
+  DemoStore.prototype.roomLogin = function (opts) {
+    var db = readDemo();
+    var room = db.rooms[opts.roomId];
+    if (!room) return Promise.resolve({ ok: false, error: 'room_not_found' });
+    if (!room.pass_hash || !room.wrapped_key) return Promise.resolve({ ok: false, error: 'room_password_missing' });
+    var lockedUntil = room.locked_until ? Date.parse(room.locked_until) : 0;
+    if (lockedUntil > Date.now()) {
+      return Promise.resolve({ ok: false, error: 'locked', locked_until: room.locked_until });
+    }
+    var passcode = String(opts.password || '');
+    var name = String(opts.name || '').slice(0, 24).trim();
+    return C.passcodeHash(passcode, room.pass_salt).then(function (hash) {
+      if (hash !== room.pass_hash) {
+        room.fail_count = (room.fail_count || 0) + 1;
+        var remaining = PASSCODE_FAIL_LIMIT - room.fail_count;
+        if (remaining <= 0) {
+          room.fail_count = 0;
+          room.locked_until = new Date(Date.now() + PASSCODE_LOCK_MS).toISOString();
+          writeDemo(db);
+          return { ok: false, error: 'locked', locked_until: room.locked_until };
+        }
+        writeDemo(db);
+        return { ok: false, error: 'bad_passcode', remaining: remaining };
+      }
+      room.fail_count = 0;
+      room.locked_until = null;
+      room.last_active = nowIso();
+
+      var hostLogin = isHostAlias(name);
+      var existing = hostLogin ? null : findMemberByName(db, room.id, name);
+      var newAvatar = opts.avatar || null;
+      var memberToken = C.randomToken(32);
+      var memberId = existing ? existing.id : uid('mem');
+      return C.sha256Hex(memberToken).then(function (memberHash) {
+        if (hostLogin) {
+          var host = null;
+          Object.keys(db.members).forEach(function (id) {
+            var m = db.members[id];
+            if (m.room_id === room.id && m.kind === 'host') host = m;
+          });
+          if (!host) return { ok: false, error: 'host_not_found' };
+          host.member_token_hash = memberHash;
+          host.last_seen = nowIso();
+          room.host_token_hash = memberHash; // 이 브라우저가 방장 권한을 이어받는다
+          memberId = host.id;
+        } else if (existing) {
+          existing.avatar = newAvatar || existing.avatar || null;
+          if (newAvatar) existing.accent = opts.accent || existing.accent || 'blue';
+          if (opts.systemPrompt) existing.system_prompt = opts.systemPrompt;
+          existing.member_token_hash = memberHash;
+          existing.last_seen = nowIso();
+        } else {
+          db.members[memberId] = {
+            id: memberId,
+            room_id: room.id,
+            name: name || '게스트',
+            kind: opts.kind === 'ai' ? 'ai' : 'guest',
+            accent: opts.accent || 'blue',
+            avatar: newAvatar,
+            system_prompt: opts.systemPrompt || null,
+            member_token_hash: memberHash,
+            created_at: nowIso(),
+            last_seen: nowIso()
+          };
+        }
+        writeDemo(db);
+        return C.unwrapRoomKeyWithPassword(room.wrapped_key, passcode, room.pass_salt).then(function (roomKey) {
+          return {
+            ok: true,
+            room_id: room.id,
+            room_name: room.name,
+            member_id: memberId,
+            member_token: memberToken,
+            room_key: roomKey,
+            is_host: hostLogin,
+            rejoined: !!existing,
+            kind: db.members[memberId].kind,
+            name: db.members[memberId].name
+          };
         });
       });
     });
@@ -675,18 +943,165 @@
     this.url = cfg.supabaseUrl;
     this.key = cfg.supabaseKey;
     this.client = null;
+    // 서버(스키마)가 어느 수준인지. 예전 스키마(무제한·재입장 없음)면 빈 객체로 남는다.
+    this.caps = {};
   }
 
   SupabaseStore.prototype.init = function () {
     var self = this;
     if (!C.hasSubtle()) return Promise.reject(new Error('crypto_unavailable'));
-    return loadSupabaseSdk().then(function (sdk) {
-      self.client = sdk.createClient(self.url, self.key, {
-        auth: { persistSession: false, autoRefreshToken: false },
-        realtime: { params: { eventsPerSecond: 8 } }
+    return loadSupabaseSdk()
+      .then(function (sdk) {
+        self.client = sdk.createClient(self.url, self.key, {
+          auth: { persistSession: false, autoRefreshToken: false },
+          realtime: { params: { eventsPerSecond: 8 } }
+        });
+        return self.detectCapabilities();
+      })
+      .then(function () {
+        return self;
       });
-      return self;
+  };
+
+  /* schema.sql 을 다시 실행하지 않은 예전 프로젝트에서도 앱이 깨지지 않게 하는 탐침.
+   * 함수가 없으면(예전 스키마) 빈 객체 → 무제한·같은 이름 재입장 기능만 꺼진다. */
+  SupabaseStore.prototype.detectCapabilities = function () {
+    var self = this;
+    return this.rpc('squad_capabilities', {})
+      .then(function (data) {
+        if (data && typeof data === 'object' && !data.error && data.version) self.caps = data;
+        else self.caps = {};
+      })
+      .catch(function () {
+        self.caps = {};
+      });
+  };
+
+  SupabaseStore.prototype.supportsUnlimited = function () {
+    return !!(this.caps && this.caps.unlimited);
+  };
+
+  SupabaseStore.prototype.supportsRejoin = function () {
+    return !!(this.caps && this.caps.rejoin);
+  };
+
+  SupabaseStore.prototype.supportsRoomLogin = function () {
+    return !!(this.caps && this.caps.room_login);
+  };
+
+  /** 초대 링크 없이 들어올 때: 가장 최근에 쓰인 방의 공개 정보 (없으면 null) */
+  SupabaseStore.prototype.defaultRoom = function () {
+    if (!this.supportsRoomLogin()) return Promise.resolve(null);
+    return this.rpc('squad_default_room', {})
+      .then(function (data) {
+        if (!data || data.error) return null;
+        return data.room || null;
+      })
+      .catch(function () {
+        return null;
+      });
+  };
+
+  SupabaseStore.prototype.publicRoomInfo = function (roomId) {
+    if (!this.supportsRoomLogin()) return Promise.resolve(null);
+    return this.rpc('squad_room_info', { p_room_id: roomId })
+      .then(function (data) {
+        if (!data || data.error || !data.id) return null;
+        return data;
+      })
+      .catch(function () {
+        return null;
+      });
+  };
+
+  /** 방 비밀번호만 먼저 확인 (실패 횟수는 서버가 센다) */
+  SupabaseStore.prototype.checkRoomPassword = function (roomId, password) {
+    var self = this;
+    if (!this.supportsRoomLogin()) return Promise.resolve({ ok: false, error: 'server_needs_update' });
+    return this.publicRoomInfo(roomId).then(function (info) {
+      if (!info) return { ok: false, error: 'room_not_found' };
+      if (!info.has_password) return { ok: false, error: 'room_password_missing' };
+      if (info.locked_until && Date.parse(info.locked_until) > Date.now()) {
+        return { ok: false, error: 'locked', locked_until: info.locked_until };
+      }
+      return C.passcodeHash(String(password || ''), info.pass_salt).then(function (passHash) {
+        return self.rpc('squad_room_check_pass', { p_room_id: roomId, p_pass_hash: passHash });
+      });
     });
+  };
+
+  /** 방장이 방 비밀번호를 정한다 (방 열쇠를 비밀번호로 감싸 서버에 둔다) */
+  SupabaseStore.prototype.setRoomPassword = function (opts) {
+    var self = this;
+    var passcode = String(opts.passcode || '');
+    if (passcode.length < 4) return Promise.reject(new Error('passcode_too_short'));
+    if (!this.supportsRoomLogin()) return Promise.reject(new Error('server_needs_update'));
+    return C.wrapRoomKeyWithPassword(opts.roomKey, passcode)
+      .then(function (w) {
+        return self.rpc('squad_room_password_set', {
+          p_room_id: opts.roomId,
+          p_host_token: opts.hostToken,
+          p_pass_salt: w.passSalt,
+          p_pass_hash: w.passHash,
+          p_wrapped_key: w.wrappedKey
+        });
+      })
+      .then(function (data) {
+        if (!data || data.error) throw new Error((data && data.error) || 'room_password_failed');
+        return { ok: true };
+      });
+  };
+
+  /** 방 비밀번호 + 이름(taewoo → 방장) 으로 들어온다 */
+  SupabaseStore.prototype.roomLogin = function (opts) {
+    var self = this;
+    if (!this.supportsRoomLogin()) return Promise.reject(new Error('server_needs_update'));
+    var passcode = String(opts.password || '');
+    var memberToken = C.randomToken(32);
+    var name = String(opts.name || '').slice(0, 24).trim();
+    return this.publicRoomInfo(opts.roomId)
+      .then(function (info) {
+        if (!info) return { ok: false, error: 'room_not_found' };
+        if (!info.has_password) return { ok: false, error: 'room_password_missing' };
+        if (info.locked_until && Date.parse(info.locked_until) > Date.now()) {
+          return { ok: false, error: 'locked', locked_until: info.locked_until };
+        }
+        return C.passcodeHash(passcode, info.pass_salt).then(function (passHash) {
+          return self
+            .rpc('squad_room_login', {
+              p_room_id: opts.roomId,
+              p_pass_hash: passHash,
+              p_name: name,
+              p_member_token: memberToken,
+              p_kind: opts.kind === 'ai' ? 'ai' : 'guest',
+              p_accent: opts.accent || 'blue',
+              p_avatar: opts.avatar || null,
+              p_system_prompt: opts.systemPrompt || null
+            })
+            .then(function (data) {
+              if (!data) return { ok: false, error: 'login_failed' };
+              if (data.error) return data;
+              return C.unwrapRoomKeyWithPassword(data.wrapped_key, passcode, info.pass_salt)
+                .then(function (roomKey) {
+                  return {
+                    ok: true,
+                    room_id: data.room_id,
+                    room_name: data.room_name,
+                    member_id: data.member_id,
+                    member_token: memberToken,
+                    room_key: roomKey,
+                    is_host: !!data.is_host,
+                    rejoined: !!data.rejoined,
+                    kind: data.kind,
+                    name: data.name || name
+                  };
+                })
+                .catch(function () {
+                  return { ok: false, error: 'room_password_mismatch' };
+                });
+            });
+        });
+      });
   };
 
   SupabaseStore.prototype.rpc = function (name, args) {
@@ -809,6 +1224,11 @@
 
   SupabaseStore.prototype.createInvite = function (opts) {
     var self = this;
+    var maxUses = normalizeMaxUses(opts.maxUses);
+    // 예전 스키마는 무제한(null)을 1명으로 바꿔 버린다. 그렇게 조용히 만들지 않고 기능을 꺼 둔다.
+    if (maxUses === null && !this.supportsUnlimited()) {
+      return Promise.reject(new Error('server_needs_update'));
+    }
     return C.makeInvite(opts.roomKey, String(opts.passcode || '')).then(function (invite) {
       var expiresAt = opts.expiresInMinutes ? new Date(Date.now() + opts.expiresInMinutes * 60000).toISOString() : null;
       return self.rpc('squad_create_invite', {
@@ -819,11 +1239,16 @@
         p_wrapped_key: invite.wrappedKey,
         p_pass_salt: invite.passSalt,
         p_pass_hash: invite.passHash,
-        p_max_uses: Math.max(1, Math.min(20, Number(opts.maxUses) || 1)),
+        p_max_uses: maxUses,
         p_expires_at: expiresAt
       }).then(function (data) {
         if (!data || data.error) throw new Error((data && data.error) || 'invite_create_failed');
-        return { id: data.id, token: invite.token, expires_at: expiresAt, max_uses: data.max_uses };
+        return {
+          id: data.id,
+          token: invite.token,
+          expires_at: expiresAt,
+          max_uses: data.max_uses === undefined ? maxUses : data.max_uses
+        };
       });
     });
   };
@@ -837,12 +1262,18 @@
         if (!info || info.error || !info.room_id) return { ok: false, error: 'invalid_invite' };
         if (info.revoked) return { ok: false, error: 'revoked' };
         if (info.expires_at && Date.parse(info.expires_at) < Date.now()) return { ok: false, error: 'expired' };
-        if (Number(info.uses) >= Number(info.max_uses)) return { ok: false, error: 'used_up' };
+        // 정원이 찼어도 여기서 막지 않는다 — 같은 이름으로 다시 들어오는 사람은 통과해야 한다.
+        // 예전 스키마는 squad_check_pass 가 used_up 을 돌려주므로 그때만 그대로 막힌다.
+        var full = isFullInvite(info.uses, info.max_uses);
+        if (full && !self.supportsRejoin()) return { ok: false, error: 'used_up' };
         if (info.locked_until && Date.parse(info.locked_until) > Date.now()) {
           return { ok: false, error: 'locked', locked_until: info.locked_until };
         }
         return C.passcodeHash(passcode, info.pass_salt).then(function (passHash) {
-          return self.rpc('squad_check_pass', { p_token_hash: hash, p_pass_hash: passHash });
+          return self.rpc('squad_check_pass', { p_token_hash: hash, p_pass_hash: passHash }).then(function (res) {
+            if (res && res.ok) return { ok: true, full: res.full === undefined ? full : !!res.full };
+            return res || { ok: false, error: 'check_failed' };
+          });
         });
       });
     });
@@ -927,7 +1358,9 @@
             room_name: data.room_name,
             member_id: data.member_id,
             member_token: memberToken,
-            room_key: roomKey
+            room_key: roomKey,
+            rejoined: !!data.rejoined,
+            name: data.name || String(opts.name || '').slice(0, 24)
           };
         });
       });
@@ -1017,6 +1450,11 @@
     listSessions: listSessions,
     getAiTokens: getAiTokens,
     saveAiToken: saveAiToken,
+    isUnlimitedUses: isUnlimitedUses,
+    normalizeMaxUses: normalizeMaxUses,
+    isFullInvite: isFullInvite,
+    isHostAlias: isHostAlias,
+    MAX_USES_CAP: MAX_USES_CAP,
     PASSCODE_FAIL_LIMIT: PASSCODE_FAIL_LIMIT,
     PASSCODE_LOCK_MS: PASSCODE_LOCK_MS
   };

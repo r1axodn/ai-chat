@@ -158,6 +158,52 @@
     });
   }
 
+  /* ---------------------------------------------------------------- 방 비밀번호
+   *
+   *  루트 주소(초대 링크 없이)에서 들어올 때 쓰는 '방 비밀번호'.
+   *  · 검증용 해시(pass_hash)와 방 열쇠를 감싸는 키는 서로 다른 PBKDF2 유도값을 쓴다.
+   *    (DB 를 읽은 사람이 pass_hash 로 방 열쇠를 풀 수 없게 하기 위해서)
+   */
+
+  function deriveRoomWrapKey(passcode, saltHex) {
+    var salt = fromHex(saltHex);
+    var extra = enc.encode('|roomkey|v1');
+    var mixed = new Uint8Array(salt.length + extra.length);
+    mixed.set(salt, 0);
+    mixed.set(extra, salt.length);
+    return webcrypto.subtle
+      .importKey('raw', enc.encode(String(passcode)), 'PBKDF2', false, ['deriveBits'])
+      .then(function (key) {
+        return webcrypto.subtle.deriveBits(
+          { name: 'PBKDF2', salt: mixed, iterations: PASSCODE_ITERATIONS, hash: 'SHA-256' },
+          key,
+          256
+        );
+      })
+      .then(function (bits) {
+        return new Uint8Array(bits);
+      });
+  }
+
+  /** 방 열쇠를 방 비밀번호로 감싼다. */
+  function wrapRoomKeyWithPassword(roomKeyB64, passcode) {
+    var salt = randomHex(16);
+    return Promise.all([passcodeHash(passcode, salt), deriveRoomWrapKey(passcode, salt)]).then(function (r) {
+      return encryptString(r[1], roomKeyB64).then(function (wrapped) {
+        return { passSalt: salt, passHash: r[0], wrappedKey: wrapped };
+      });
+    });
+  }
+
+  /** 방 비밀번호 + 감싼 열쇠 → 방 열쇠 */
+  function unwrapRoomKeyWithPassword(wrappedKey, passcode, saltHex) {
+    return deriveRoomWrapKey(passcode, saltHex).then(function (keyBytes) {
+      return decryptString(keyBytes, wrappedKey).catch(function () {
+        throw new Error('room_password_mismatch');
+      });
+    });
+  }
+
   /* ---------------------------------------------------------------- 유틸 */
 
   /** 32바이트 방 열쇠 만들기 */
@@ -182,6 +228,8 @@
     makeInvite: makeInvite,
     parseInviteToken: parseInviteToken,
     unwrapRoomKey: unwrapRoomKey,
+    wrapRoomKeyWithPassword: wrapRoomKeyWithPassword,
+    unwrapRoomKeyWithPassword: unwrapRoomKeyWithPassword,
     newRoomKey: newRoomKey,
     roomKeyBytes: roomKeyBytes,
     PASSCODE_ITERATIONS: PASSCODE_ITERATIONS
