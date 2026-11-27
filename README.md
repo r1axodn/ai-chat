@@ -68,6 +68,7 @@ supabase secrets set GEMINI_API_KEY=AIza... --project-ref <프로젝트ref>
 ```
 
 - 모델: **`gemini-3.8-flash` 가 기본**이고 `gemini-3.6-flash` / `gemini-3.5-flash-lite` / `gemini-3.1-flash-lite`, 구형 호환용으로 `gemini-2.5-flash` / `gemini-2.5-flash-lite` 를 고를 수 있습니다. 목록에 없는 모델은 **[모델 → 직접 입력…]** 에 모델 코드를 넣으면 그대로 씁니다.
+- 예전에 기본값(2.5 Flash)이 저장된 브라우저는 처음 열 때 **한 번만** 새 기본값으로 자동 이전되고, 그 뒤에 직접 고른 구형 모델은 그대로 유지됩니다.
 - `gemini-2.5-flash`·`gemini-2.5-pro` 는 이미 신규 키에서 막혀 있고(2026-12-01 부터는 `gemini-3.5-flash-lite`·`gemini-3.8-flash` 로 자동 연결), 그대로 부르면 *This model … is no longer available to new users* 오류가 납니다. 그래서 기본값을 3.8 Flash 로 두었습니다.
 - Gemini 3 계열은 `temperature` 대신 `generationConfig.thinkingConfig.thinkingLevel: 'low'` 를 쓰고, 생각 토큰이 출력 한도에 포함되므로 `maxOutputTokens` 를 1024 로 잡습니다. (구형 2.5 계열은 기존처럼 temperature·topP, 220 토큰)
 - 실사용은 **서버 함수 모드**를 권장합니다. 키가 브라우저로 나가지 않고, 함수가 요청 크기·모델·호출량(분당 30회)을 제한합니다.

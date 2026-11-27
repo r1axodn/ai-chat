@@ -37,6 +37,20 @@
     return /^gemini-([34])([.\-]|$)/i.test(normalizeModel(model));
   }
 
+  /* 신규 키에서 막힌 모델. 저장된 설정이 이 값이면 한 번만 새 기본값으로 옮긴다. */
+  var RETIRED_MODELS = {
+    'gemini-2.5-flash': 1,
+    'gemini-2.5-pro': 1,
+    'gemini-2.0-flash': 1,
+    'gemini-2.0-flash-lite': 1,
+    'gemini-1.5-flash': 1,
+    'gemini-1.5-pro': 1
+  };
+
+  function isRetiredModel(model) {
+    return !!RETIRED_MODELS[String(model == null ? '' : model).trim().replace(/^models\//i, '')];
+  }
+
   function generationConfigFor(model) {
     if (isThinkingModel(model)) {
       return {
@@ -48,18 +62,36 @@
   }
 
   function readSettings() {
+    var v = {};
     try {
       var raw = localStorage.getItem(SETTINGS_KEY);
-      var v = raw ? JSON.parse(raw) : {};
-      return {
-        mode: v.mode || 'mock',
-        model: normalizeModel(v.model),
-        autoReply: v.autoReply !== false,
-        aiToAi: !!v.aiToAi
-      };
+      v = (raw ? JSON.parse(raw) : null) || {};
     } catch (e) {
-      return { mode: 'mock', model: DEFAULT_MODEL, autoReply: true, aiToAi: false };
+      v = {};
     }
+    var model = normalizeModel(v.model);
+    // 예전 기본값(2.5 Flash 등)이 그대로 저장돼 있으면 한 번만 새 기본값으로 옮긴다.
+    // 한 번 옮긴 뒤에 사용자가 직접 구형 모델을 고르면 그 선택은 건드리지 않는다.
+    var migrated = v.modelMigrated === true;
+    if (!migrated) {
+      if (!v.model || isRetiredModel(v.model)) model = DEFAULT_MODEL;
+      migrated = true;
+    }
+    var next = {
+      mode: v.mode || 'mock',
+      model: model,
+      autoReply: v.autoReply !== false,
+      aiToAi: !!v.aiToAi,
+      modelMigrated: migrated
+    };
+    if (v.modelMigrated !== true) {
+      try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+      } catch (e) {
+        /* noop */
+      }
+    }
+    return next;
   }
 
   function writeSettings(patch) {
